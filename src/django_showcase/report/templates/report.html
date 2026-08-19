@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>django-showcase report</title>
+  <style>
+    :root {
+      --bg: #f3efe6;
+      --panel: #fffdf8;
+      --ink: #1f1a17;
+      --muted: #6f6258;
+      --accent: #bf5b2c;
+      --border: #d8cbbb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, "Iowan Old Style", serif;
+      background:
+        radial-gradient(circle at top left, rgba(191, 91, 44, 0.18), transparent 22%),
+        linear-gradient(180deg, #f7f2e9 0%, #efe4d3 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 48px 20px 80px;
+    }
+    h1 {
+      font-size: clamp(2.2rem, 5vw, 4rem);
+      margin: 0 0 12px;
+      letter-spacing: -0.03em;
+    }
+    .lede {
+      color: var(--muted);
+      max-width: 70ch;
+      font-size: 1.05rem;
+      line-height: 1.6;
+    }
+    .module {
+      margin-top: 40px;
+      padding: 24px;
+      background: rgba(255, 253, 248, 0.82);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      backdrop-filter: blur(4px);
+    }
+    .scenario-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 16px;
+    }
+    .scenario-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 16px 40px rgba(31, 26, 23, 0.06);
+    }
+    .scenario-card h3 {
+      margin-top: 0;
+      font-size: 1.05rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>django-showcase</h1>
+    <p class="lede">Scenario-first product documentation for Django applications. This report groups capture plans by module so coverage stays centered on meaningful product states, not raw URL lists.</p>
+    __SECTIONS__
+  </main>
+</body>
+</html>
