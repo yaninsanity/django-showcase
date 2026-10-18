@@ -33,14 +33,21 @@ _SUMMARY = """<section class="module">
 
 
 class ReportBuilder:
-    def build(self, report_dir: Path, plans: list[CapturePlan], manifest: dict[str, object] | None = None) -> Path:
+    def build(
+        self,
+        report_dir: Path,
+        plans: list[CapturePlan],
+        manifest: dict[str, object] | None = None,
+    ) -> Path:
         report_dir.mkdir(parents=True, exist_ok=True)
         grouped: dict[str, list[CapturePlan]] = defaultdict(list)
         for plan in plans:
             grouped[plan.module].append(plan)
 
         module_sections = []
-        module_meta = {entry["module"]: entry for entry in (manifest or {}).get("modules", [])}
+        module_meta = {
+            entry["module"]: entry for entry in (manifest or {}).get("modules", [])
+        }
         for module, module_plans in sorted(grouped.items()):
             cards = [
                 _CARD.format(
@@ -52,7 +59,9 @@ class ReportBuilder:
                 )
                 for plan in sorted(module_plans, key=lambda item: item.scenario)
             ]
-            meta = module_meta.get(module, {"selected": len(module_plans), "candidates": len(module_plans)})
+            meta = module_meta.get(
+                module, {"selected": len(module_plans), "candidates": len(module_plans)}
+            )
             module_sections.append(
                 _SECTION.format(
                     module=module.title(),
@@ -66,7 +75,9 @@ class ReportBuilder:
         summary = _SUMMARY.format(
             framework=frontend.get("framework", "django-mvt"),
             profile=frontend.get("profile", frontend.get("framework", "django-mvt")),
-            capture_backend=((manifest or {}).get("capture") or {}).get("backend", "unknown"),
+            capture_backend=((manifest or {}).get("capture") or {}).get(
+                "backend", "unknown"
+            ),
             routes=frontend.get("routes", 0),
             router_files=len(frontend.get("router_files", [])),
             components=frontend.get("components", 0),

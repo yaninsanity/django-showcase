@@ -13,7 +13,14 @@ def _plan() -> CapturePlan:
         actor="staff",
         seed_provider="deterministic",
         estimated_objects=3,
-        captures=[CaptureTarget(viewport="desktop", width=800, height=600, output_path="orders/pending/desktop.png")],
+        captures=[
+            CaptureTarget(
+                viewport="desktop",
+                width=800,
+                height=600,
+                output_path="orders/pending/desktop.png",
+            )
+        ],
     )
 
 

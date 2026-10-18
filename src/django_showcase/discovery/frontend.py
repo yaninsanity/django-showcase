@@ -9,10 +9,19 @@ from typing import Iterator
 
 _SOURCE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte"}
 _ROUTE_RE = re.compile(r"""path\s*[:=]\s*["']([^"']*)["']""")
-_ROUTER_SIGNAL_RE = re.compile(r"useRoutes|createBrowserRouter|Routes|Route|router|routes", re.IGNORECASE)
-_COMPONENT_NAME_RE = re.compile(r"(?:export\s+default\s+function|function|const)\s+([A-Z][A-Za-z0-9_]*)")
+_ROUTER_SIGNAL_RE = re.compile(
+    r"useRoutes|createBrowserRouter|Routes|Route|router|routes", re.IGNORECASE
+)
+_COMPONENT_NAME_RE = re.compile(
+    r"(?:export\s+default\s+function|function|const)\s+([A-Z][A-Za-z0-9_]*)"
+)
 _MAX_FILES = 400
-_FRAMEWORK_DEPS = {"react": "react", "vue": "vue", "svelte": "svelte", "@angular/core": "angular"}
+_FRAMEWORK_DEPS = {
+    "react": "react",
+    "vue": "vue",
+    "svelte": "svelte",
+    "@angular/core": "angular",
+}
 _ROUTER_FILE_HINTS = ("route", "router", "routes", "navigation", "app")
 
 
@@ -95,7 +104,9 @@ def detect_frontend(root: Path) -> FrontendInfo:
     profile = FRONTEND_PROFILES[framework]
     if framework == "django-mvt":
         return FrontendInfo(framework=framework, profile=profile, roots=[str(root)])
-    router_files = [str(path.relative_to(root)) for path in scan_router_files(root, profile)]
+    router_files = [
+        str(path.relative_to(root)) for path in scan_router_files(root, profile)
+    ]
     return FrontendInfo(
         framework=framework,
         profile=profile,
@@ -109,7 +120,9 @@ def detect_frontend(root: Path) -> FrontendInfo:
 def detect_frontends(roots: list[Path]) -> FrontendInfo:
     infos = [detect_frontend(root) for root in roots if root.exists()]
     if not infos:
-        return FrontendInfo(framework="django-mvt", profile=FRONTEND_PROFILES["django-mvt"])
+        return FrontendInfo(
+            framework="django-mvt", profile=FRONTEND_PROFILES["django-mvt"]
+        )
 
     framework = _pick_framework(infos)
     profile = FRONTEND_PROFILES[framework]
@@ -140,10 +153,14 @@ def route_from_path(path: str) -> FrontendRoute:
     clean = "/" + path.strip("/")
     segment = clean.strip("/").split("/")[0]
     module = re.sub(r"[^a-z0-9_]+", "", segment.lower()) or "home"
-    return FrontendRoute(path=clean, module=module, title=module.replace("_", " ").title())
+    return FrontendRoute(
+        path=clean, module=module, title=module.replace("_", " ").title()
+    )
 
 
-def scan_frontend_routes(root: Path, profile: FrontendProfile | None = None) -> list[FrontendRoute]:
+def scan_frontend_routes(
+    root: Path, profile: FrontendProfile | None = None
+) -> list[FrontendRoute]:
     profile = profile or FRONTEND_PROFILES[_detect_framework(root)]
     seen: dict[str, FrontendRoute] = {}
     router_files = scan_router_files(root, profile)
@@ -167,20 +184,30 @@ def scan_router_files(root: Path, profile: FrontendProfile | None = None) -> lis
     for source in _iter_sources(root):
         name = source.name.lower()
         text = source.read_text(encoding="utf-8", errors="ignore")
-        if any(hint in name for hint in profile.router_file_hints) or any(
-            signal in text for signal in profile.router_signals
-        ) or _ROUTER_SIGNAL_RE.search(text):
+        if (
+            any(hint in name for hint in profile.router_file_hints)
+            or any(signal in text for signal in profile.router_signals)
+            or _ROUTER_SIGNAL_RE.search(text)
+        ):
             matches.append(source)
     return matches
 
 
-def scan_frontend_components(root: Path, profile: FrontendProfile | None = None) -> list[FrontendComponent]:
+def scan_frontend_components(
+    root: Path, profile: FrontendProfile | None = None
+) -> list[FrontendComponent]:
     profile = profile or FRONTEND_PROFILES[_detect_framework(root)]
     components: dict[str, FrontendComponent] = {}
     for source in _iter_sources(root):
-        if profile.component_dir_hints and not any(
-            hint in part.lower() for part in source.parts for hint in profile.component_dir_hints
-        ) and not source.stem[:1].isupper():
+        if (
+            profile.component_dir_hints
+            and not any(
+                hint in part.lower()
+                for part in source.parts
+                for hint in profile.component_dir_hints
+            )
+            and not source.stem[:1].isupper()
+        ):
             continue
         text = source.read_text(encoding="utf-8", errors="ignore")
         names = {match.group(1) for match in _COMPONENT_NAME_RE.finditer(text)}

@@ -30,19 +30,25 @@ def test_guardrails_reject_unknown_model():
 
 
 def test_guardrails_reject_invalid_choice():
-    plan = SeedPlan(models=[ModelSeed(model="shop.Order", count=1, fields={"status": "cancelled"})])
+    plan = SeedPlan(
+        models=[ModelSeed(model="shop.Order", count=1, fields={"status": "cancelled"})]
+    )
     with pytest.raises(ValidationError, match="Invalid choice"):
         SeedPlanGuardrails().check(plan)
 
 
 def test_guardrails_reject_excessive_volume():
-    plan = SeedPlan(models=[ModelSeed(model="shop.Order", count=10, fields={"status": "pending"})])
+    plan = SeedPlan(
+        models=[ModelSeed(model="shop.Order", count=10, fields={"status": "pending"})]
+    )
     with pytest.raises(ValidationError, match="max_objects"):
         SeedPlanGuardrails(max_objects=5).check(plan)
 
 
 def test_agentic_provider_caches_plans(tmp_path):
-    valid_plan = SeedPlan(models=[ModelSeed(model="shop.Order", count=3, fields={"status": "paid"})])
+    valid_plan = SeedPlan(
+        models=[ModelSeed(model="shop.Order", count=3, fields={"status": "paid"})]
+    )
     agent = StubAgent(valid_plan)
     provider = AgenticProvider(
         agent=agent,
@@ -77,6 +83,11 @@ def test_parse_seed_plan_rejects_non_json():
 
 
 def test_parse_seed_plan_builds_structured_plan():
-    plan = parse_seed_plan('{"models": [{"model": "shop.Order", "count": 2, "fields": {"status": "pending"}}]}')
+    plan = parse_seed_plan(
+        (
+            '{"models": [{"model": "shop.Order", "count": 2, '
+            '"fields": {"status": "pending"}}]}'
+        )
+    )
     assert plan.models[0].model == "shop.Order"
     assert plan.models[0].count == 2

@@ -8,13 +8,20 @@ from django_showcase.discovery.frontend import detect_frontend, detect_frontends
 
 
 def test_detect_react_and_scan_routes(tmp_path):
-    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"react": "^18.0.0"}}))
+    (tmp_path / "package.json").write_text(
+        json.dumps({"dependencies": {"react": "^18.0.0"}})
+    )
     src = tmp_path / "src"
     src.mkdir()
     (src / "routes.tsx").write_text(
-        'const routes = [{path: "/orders"}, {path: "/dashboard"}, {path: "/orders/:id"}, {path: "*"}]'
+        (
+            'const routes = [{path: "/orders"}, {path: "/dashboard"}, '
+            '{path: "/orders/:id"}, {path: "*"}]'
+        )
     )
-    (src / "OrdersPage.tsx").write_text('export default function OrdersPage() { return null; }')
+    (src / "OrdersPage.tsx").write_text(
+        "export default function OrdersPage() { return null; }"
+    )
 
     info = detect_frontend(tmp_path)
 
@@ -37,15 +44,21 @@ def test_detect_mvt_without_package_json(tmp_path):
 
 
 def test_detect_vue_uses_vue_router_signals(tmp_path):
-    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"vue": "^3.0.0"}}))
+    (tmp_path / "package.json").write_text(
+        json.dumps({"dependencies": {"vue": "^3.0.0"}})
+    )
     src = tmp_path / "src"
     src.mkdir()
     (src / "router.ts").write_text(
-        'import { createRouter, createWebHistory } from "vue-router";\n'
-        'export const router = createRouter({ history: createWebHistory(), routes: [{ path: "/customers" }] });'
+        'import { createRouter, createWebHistory } from "vue-router";\n'(
+            "export const router = createRouter({ history: createWebHistory(), "
+            'routes: [{ path: "/customers" }] });'
+        )
     )
     (src / "views").mkdir()
-    (src / "views" / "CustomersView.vue").write_text('<script setup>const x = 1</script>')
+    (src / "views" / "CustomersView.vue").write_text(
+        "<script setup>const x = 1</script>"
+    )
 
     info = detect_frontend(tmp_path)
 
@@ -54,11 +67,16 @@ def test_detect_vue_uses_vue_router_signals(tmp_path):
     assert info.profile.name == "vue"
     assert info.router_files == ["src/router.ts"]
     assert {route.path for route in info.routes} == {"/customers"}
-    assert any(component.file_path == "src/views/CustomersView.vue" for component in info.components)
+    assert any(
+        component.file_path == "src/views/CustomersView.vue"
+        for component in info.components
+    )
 
 
 def test_detect_angular_uses_routing_files(tmp_path):
-    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"@angular/core": "^19.0.0"}}))
+    (tmp_path / "package.json").write_text(
+        json.dumps({"dependencies": {"@angular/core": "^19.0.0"}})
+    )
     src = tmp_path / "src" / "app"
     src.mkdir(parents=True)
     (src / "app-routing.module.ts").write_text(
@@ -66,7 +84,9 @@ def test_detect_angular_uses_routing_files(tmp_path):
         'const routes: Routes = [{ path: "orders", component: OrdersPageComponent }];'
     )
     (src / "features").mkdir()
-    (src / "features" / "OrdersPageComponent.ts").write_text('export class OrdersPageComponent {}')
+    (src / "features" / "OrdersPageComponent.ts").write_text(
+        "export class OrdersPageComponent {}"
+    )
 
     info = detect_frontend(tmp_path)
 
@@ -78,7 +98,14 @@ def test_detect_angular_uses_routing_files(tmp_path):
 
 def test_parse_frontend_routes_filters_unsafe_paths():
     raw = json.dumps(
-        {"routes": [{"path": "/billing"}, {"path": "javascript:alert(1)"}, {"path": "/x/:id"}, {"path": "*"}]}
+        {
+            "routes": [
+                {"path": "/billing"},
+                {"path": "javascript:alert(1)"},
+                {"path": "/x/:id"},
+                {"path": "*"},
+            ]
+        }
     )
     routes = parse_frontend_routes(raw)
     assert [route.path for route in routes] == ["/billing"]
@@ -94,8 +121,12 @@ def test_detect_frontends_merges_parallel_roots(tmp_path):
     frontend = tmp_path / "frontend"
     backend.mkdir()
     frontend.mkdir()
-    (backend / "package.json").write_text(json.dumps({"dependencies": {"react": "^18.0.0"}}))
-    (frontend / "package.json").write_text(json.dumps({"dependencies": {"react": "^18.0.0"}}))
+    (backend / "package.json").write_text(
+        json.dumps({"dependencies": {"react": "^18.0.0"}})
+    )
+    (frontend / "package.json").write_text(
+        json.dumps({"dependencies": {"react": "^18.0.0"}})
+    )
     (backend / "src").mkdir(parents=True)
     (frontend / "src").mkdir(parents=True)
     (backend / "src" / "routes.tsx").write_text('const routes = [{path: "/dashboard"}]')

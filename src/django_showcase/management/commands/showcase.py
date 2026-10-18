@@ -3,20 +3,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from django.core.management.base import BaseCommand
 from django.core.exceptions import ImproperlyConfigured
+from django.core.management.base import BaseCommand
 
 from django_showcase.agent import load_agent_provider
 from django_showcase.agent.base import SeedPlanningRequest
 from django_showcase.agent.cache import SeedPlanCache
 from django_showcase.agent.guardrails import SeedPlanGuardrails
-from django_showcase.agent.operations import AgentWarningCollector, safe_plan_frontend_routes, safe_plan_seed
+from django_showcase.agent.operations import (
+    AgentWarningCollector,
+    safe_plan_frontend_routes,
+    safe_plan_seed,
+)
 from django_showcase.agent.tools import build_schema_summary
 from django_showcase.capture.capture import CaptureEngine
 from django_showcase.capture.compiler import CapturePlanCompiler
 from django_showcase.config import ShowcaseConfig, _load_prompt_file
-from django_showcase.discovery.models import inspect_models
 from django_showcase.discovery.frontend import collect_route_snippets, detect_frontends
+from django_showcase.discovery.models import inspect_models
 from django_showcase.discovery.project import build_project_context
 from django_showcase.discovery.urls import RouteInfo, discover_routes
 from django_showcase.discovery.views import inspect_views
@@ -34,9 +38,17 @@ class Command(BaseCommand):
     help = "Generate scenario-first product documentation for a Django project."
 
     def add_arguments(self, parser) -> None:
-        parser.add_argument("--plan", action="store_true", help="Plan only without executing captures.")
-        parser.add_argument("--agentic", action="store_true", help="Enable agentic providers when configured.")
-        parser.add_argument("--scenarios", action="store_true", help="Run in isolated scenario mode.")
+        parser.add_argument(
+            "--plan", action="store_true", help="Plan only without executing captures."
+        )
+        parser.add_argument(
+            "--agentic",
+            action="store_true",
+            help="Enable agentic providers when configured.",
+        )
+        parser.add_argument(
+            "--scenarios", action="store_true", help="Run in isolated scenario mode."
+        )
         parser.add_argument(
             "--seed-strategy",
             choices=["goal_only", "all_pages"],
@@ -54,7 +66,9 @@ class Command(BaseCommand):
             default=None,
             help="JSON file with prompt overrides for agentic mode.",
         )
-        parser.add_argument("--only", nargs="*", default=[], help="Limit execution to specific modules.")
+        parser.add_argument(
+            "--only", nargs="*", default=[], help="Limit execution to specific modules."
+        )
 
     def handle(self, *args, **options) -> None:
         config = ShowcaseConfig.from_settings()
@@ -81,7 +95,11 @@ class Command(BaseCommand):
             except ImproperlyConfigured as exc:
                 warnings.warn(f"Agentic mode disabled: {exc}")
 
-        frontend_roots = [config.frontend_dir, *config.frontend_dirs, *(Path(item) for item in options["frontend_dir"])]
+        frontend_roots = [
+            config.frontend_dir,
+            *config.frontend_dirs,
+            *(Path(item) for item in options["frontend_dir"]),
+        ]
         unique_roots: list[Path] = []
         seen_roots: set[str] = set()
         for root in frontend_roots:
@@ -93,17 +111,22 @@ class Command(BaseCommand):
 
         frontend = detect_frontends(unique_roots)
         if agentic and frontend.framework != "django-mvt" and not frontend.routes:
-            snippet_root = next((root for root in unique_roots if root.exists()), config.frontend_dir)
+            snippet_root = next(
+                (root for root in unique_roots if root.exists()), config.frontend_dir
+            )
             frontend.routes = safe_plan_frontend_routes(
                 agentic,
                 frontend.framework,
                 collect_route_snippets(snippet_root),
                 warnings,
             )
-        self.stdout.write(
-            f"Frontend: {frontend.framework} ({len(frontend.routes)} SPA routes, "
-            f"{len(frontend.router_files)} router files, {len(frontend.components)} components)"
+        frontend_summary = (
+            f"Frontend: {frontend.framework} "
+            f"({len(frontend.routes)} SPA routes, "
+            f"{len(frontend.router_files)} router files, "
+            f"{len(frontend.components)} components)"
         )
+        self.stdout.write(frontend_summary)
 
         routes = discover_routes()
         routes += [
@@ -153,17 +176,29 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("Planning Showcase"))
         for plan in plans:
-            self.stdout.write(f"  - {plan.scenario} [{plan.route}] {len(plan.captures)} captures")
+            self.stdout.write(
+                f"  - {plan.scenario} [{plan.route}] {len(plan.captures)} captures"
+            )
 
         self.stdout.write(
-            f"Estimated: {len(plans)} scenarios, {sum(len(plan.captures) for plan in plans)} captures"
+            f"Estimated: {len(plans)} scenarios, "
+            f"{sum(len(plan.captures) for plan in plans)} captures"
         )
         for module_id, candidate_count in sorted(graph.module_candidate_counts.items()):
-            selected_count = sum(1 for scenario in graph.scenarios.values() if scenario.module == module_id)
-            self.stdout.write(f"  - {module_id}: selected {selected_count} of {candidate_count} candidates")
+            selected_count = sum(
+                1
+                for scenario in graph.scenarios.values()
+                if scenario.module == module_id
+            )
+            self.stdout.write(
+                "  - "
+                f"{module_id}: selected {selected_count} of {candidate_count} "
+                "candidates"
+            )
 
         if options["plan"]:
-            self.stdout.write(self.style.SUCCESS(f"Wrote plan to {config.output_dir / 'manifest.json'}"))
+            manifest_path = config.output_dir / "manifest.json"
+            self.stdout.write(self.style.SUCCESS(f"Wrote plan to {manifest_path}"))
             return
 
         validator = SeedPlanValidator(max_objects=config.max_seed_objects)
@@ -185,7 +220,10 @@ class Command(BaseCommand):
                 scenario = graph.scenarios[plan.scenario]
                 with scenario_transaction(session):
                     if agentic and (seed_strategy == "all_pages" or scenario.goal):
-                        goal = scenario.goal or f"Show a realistic demo state for route {scenario.route}."
+                        goal = scenario.goal or (
+                            "Show a realistic demo state for route "
+                            f"{scenario.route}."
+                        )
                         seed_plan = safe_plan_seed(
                             agentic,
                             SeedPlanningRequest(
@@ -201,7 +239,9 @@ class Command(BaseCommand):
                     elif scenario.seed:
                         seed_plan = validator.validate(scenario.seed.compile())
                         seeded += executor.execute(seed_plan).objects_created
-                    capture_result = capture_engine.execute(plan, config.screenshots_dir)
+                    capture_result = capture_engine.execute(
+                        plan, config.screenshots_dir
+                    )
                     capture_backends.add(capture_result.backend_used)
                     warnings.messages.extend(capture_result.warnings)
                     created.extend(capture_result.created_paths)
@@ -215,14 +255,26 @@ class Command(BaseCommand):
             module_candidate_counts=graph.module_candidate_counts,
             warnings=warnings.messages,
         )
-        manifest["capture"]["backend"] = "+".join(sorted(capture_backends)) if capture_backends else "none"
-        (config.output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        manifest["capture"]["backend"] = (
+            "+".join(sorted(capture_backends)) if capture_backends else "none"
+        )
+        (config.output_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2), encoding="utf-8"
+        )
         report_path = ReportBuilder().build(config.report_dir, plans, manifest=manifest)
-        archive_path = build_showcase_zip(config.output_dir, filename=config.archive_filename)
+        archive_path = build_showcase_zip(
+            config.output_dir, filename=config.archive_filename
+        )
         for message in warnings.messages:
             self.stdout.write(self.style.WARNING(message))
-        self.stdout.write(self.style.SUCCESS(f"Manifest scenarios: {len(manifest['scenarios'])}"))
-        self.stdout.write(self.style.SUCCESS(f"Seeded {seeded} ephemeral demo objects (rolled back)"))
-        self.stdout.write(self.style.SUCCESS(f"Created {len(created)} capture artifacts"))
+        self.stdout.write(
+            self.style.SUCCESS(f"Manifest scenarios: {len(manifest['scenarios'])}")
+        )
+        self.stdout.write(
+            self.style.SUCCESS(f"Seeded {seeded} ephemeral demo objects (rolled back)")
+        )
+        self.stdout.write(
+            self.style.SUCCESS(f"Created {len(created)} capture artifacts")
+        )
         self.stdout.write(self.style.SUCCESS(f"Report written to {report_path}"))
         self.stdout.write(self.style.SUCCESS(f"Archive written to {archive_path}"))

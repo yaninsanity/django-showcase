@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import Iterable
 
 from django.urls import URLPattern, URLResolver, get_resolver
@@ -20,7 +20,9 @@ def discover_routes() -> list[RouteInfo]:
     return list(_flatten_patterns(resolver.url_patterns))
 
 
-def _flatten_patterns(patterns: Iterable[URLPattern | URLResolver], prefix: str = "") -> Iterable[RouteInfo]:
+def _flatten_patterns(
+    patterns: Iterable[URLPattern | URLResolver], prefix: str = ""
+) -> Iterable[RouteInfo]:
     for entry in patterns:
         current_pattern = prefix + str(entry.pattern)
         if isinstance(entry, URLResolver):

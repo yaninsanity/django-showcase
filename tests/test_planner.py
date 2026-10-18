@@ -18,7 +18,10 @@ def test_planner_generates_status_and_staff_scenarios(settings):
     )
 
     assert "orders.orders.default" in graph.scenarios
-    assert any(scenario_id.startswith("config.unnamed_config") for scenario_id in graph.scenarios)
+    assert any(
+        scenario_id.startswith("config.unnamed_config")
+        for scenario_id in graph.scenarios
+    )
     assert "orders.orders.empty" in graph.scenarios
     assert "admin.admin_orders.permission_denied" in graph.scenarios
     assert "orders.orders.pending" in graph.scenarios

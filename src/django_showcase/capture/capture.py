@@ -8,7 +8,8 @@ from typing import Literal
 from django_showcase.capture.plan import CapturePlan
 
 _MINIMAL_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2p9e8AAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2p"
+    "9e8AAAAASUVORK5CYII="
 )
 
 
@@ -45,7 +46,9 @@ class CaptureEngine:
             return fallback
         return self._execute_placeholder(plan, output_dir)
 
-    def _execute_placeholder(self, plan: CapturePlan, output_dir: Path) -> CaptureResult:
+    def _execute_placeholder(
+        self, plan: CapturePlan, output_dir: Path
+    ) -> CaptureResult:
         created: list[str] = []
         for target in plan.captures:
             target_path = output_dir / target.output_path
@@ -73,7 +76,9 @@ class CaptureEngine:
         except Exception as exc:
             return CaptureResult(
                 backend_used="placeholder",
-                warnings=[f"Playwright unavailable; using placeholder captures ({exc})."],
+                warnings=[
+                    f"Playwright unavailable; using placeholder captures ({exc})."
+                ],
             )
 
         created: list[str] = []
@@ -85,7 +90,9 @@ class CaptureEngine:
                 page = browser.new_page()
                 page.set_default_timeout(int(self.timeout_seconds * 1000))
                 for target in plan.captures:
-                    page.set_viewport_size({"width": target.width, "height": target.height})
+                    page.set_viewport_size(
+                        {"width": target.width, "height": target.height}
+                    )
                     page.goto(target_url, wait_until="networkidle")
                     target_path = output_dir / target.output_path
                     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,12 +100,16 @@ class CaptureEngine:
                     created.append(str(target_path))
                 browser.close()
         except Exception as exc:
-            warnings.append(f"Playwright capture failed; using placeholder captures ({exc}).")
+            warnings.append(
+                f"Playwright capture failed; using placeholder captures ({exc})."
+            )
             fallback = self._execute_placeholder(plan, output_dir)
             fallback.warnings.extend(warnings)
             return fallback
 
-        return CaptureResult(created_paths=created, backend_used="playwright", warnings=warnings)
+        return CaptureResult(
+            created_paths=created, backend_used="playwright", warnings=warnings
+        )
 
     def _resolve_url(self, plan: CapturePlan) -> str:
         base = (self.base_url or "").rstrip("/")

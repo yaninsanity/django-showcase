@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -36,7 +36,9 @@ class ShowcaseConfig:
         raw = getattr(settings, "SHOWCASE", {})
         base_dir = Path(raw.get("OUTPUT_DIR", ".showcase"))
         frontend_dir = Path(raw.get("FRONTEND_DIR", getattr(settings, "BASE_DIR", ".")))
-        frontend_dirs = [Path(item) for item in raw.get("FRONTEND_DIRS", [])] or [frontend_dir]
+        frontend_dirs = [Path(item) for item in raw.get("FRONTEND_DIRS", [])] or [
+            frontend_dir
+        ]
         prompt_overrides = dict(raw.get("PROMPTS", {}))
         prompt_file = raw.get("PROMPT_FILE")
         if prompt_file:

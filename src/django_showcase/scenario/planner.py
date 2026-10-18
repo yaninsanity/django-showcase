@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 from django_showcase.discovery.models import ModelMetadata
 from django_showcase.discovery.urls import RouteInfo
@@ -51,14 +51,17 @@ class ScenarioPlanner:
             deduped = _dedupe_scenarios(candidates)
             graph.module_candidate_counts[module_id] = len(deduped)
             baseline_ids = {
-                scenario.id
-                for scenario in deduped
-                if scenario.id.endswith(".default")
+                scenario.id for scenario in deduped if scenario.id.endswith(".default")
             }
             baseline = [scenario for scenario in deduped if scenario.id in baseline_ids]
-            extras = [scenario for scenario in deduped if scenario.id not in baseline_ids]
+            extras = [
+                scenario for scenario in deduped if scenario.id not in baseline_ids
+            ]
             extra_limit = max(0, inputs.max_scenarios_per_module - len(baseline))
-            selected = baseline + sorted(extras, key=score_scenario, reverse=True)[:extra_limit]
+            selected = (
+                baseline
+                + sorted(extras, key=score_scenario, reverse=True)[:extra_limit]
+            )
             for scenario in selected:
                 graph.scenarios[scenario.id] = scenario
 
@@ -122,8 +125,14 @@ class ScenarioPlanner:
                                     module=module_id,
                                     route=route.name,
                                     title=choice.replace("_", " ").title(),
-                                    goal=f"Show {route.name} with {model.label} records in the {choice} state.",
-                                    description=f"State derived from {model.label}.{field.name}={choice}",
+                                    goal=(
+                                        f"Show {route.name} with {model.label} "
+                                        f"records in the {choice} state."
+                                    ),
+                                    description=(
+                                        f"State derived from {model.label}."
+                                        f"{field.name}={choice}"
+                                    ),
                                     params={"route_path": route.pattern},
                                     seed=SeedSpec(
                                         models=[
