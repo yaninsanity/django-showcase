@@ -50,7 +50,8 @@ def test_detect_vue_uses_vue_router_signals(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     (src / "router.ts").write_text(
-        'import { createRouter, createWebHistory } from "vue-router";\n'(
+        (
+            'import { createRouter, createWebHistory } from "vue-router";\n'
             "export const router = createRouter({ history: createWebHistory(), "
             'routes: [{ path: "/customers" }] });'
         )

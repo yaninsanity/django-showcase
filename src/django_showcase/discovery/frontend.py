@@ -105,7 +105,7 @@ def detect_frontend(root: Path) -> FrontendInfo:
     if framework == "django-mvt":
         return FrontendInfo(framework=framework, profile=profile, roots=[str(root)])
     router_files = [
-        str(path.relative_to(root)) for path in scan_router_files(root, profile)
+        _relative_path(path, root) for path in scan_router_files(root, profile)
     ]
     return FrontendInfo(
         framework=framework,
@@ -173,7 +173,7 @@ def scan_frontend_routes(
             if not raw.startswith("/") or "*" in raw or ":" in raw:
                 continue
             route = route_from_path(raw)
-            route.source_file = str(source.relative_to(root))
+            route.source_file = _relative_path(source, root)
             seen.setdefault(route.path, route)
     return list(seen.values())
 
@@ -219,10 +219,14 @@ def scan_frontend_components(
                 id=f"{module}.{name.lower()}",
                 name=name,
                 module=module,
-                file_path=str(source.relative_to(root)),
+                file_path=_relative_path(source, root),
             )
             components.setdefault(component.id, component)
     return list(components.values())
+
+
+def _relative_path(path: Path, root: Path) -> str:
+    return path.relative_to(root).as_posix()
 
 
 def collect_route_snippets(root: Path, limit: int = 8000) -> str:
