@@ -119,19 +119,20 @@ class ScenarioPlanner:
                 for field in model.fields:
                     if field.choices:
                         for choice in field.choices[:max_choices_per_field]:
+                            choice_text = str(choice)
                             scenarios.append(
                                 Scenario(
                                     id=f"{module_id}.{route_key}.{choice}",
                                     module=module_id,
                                     route=route.name,
-                                    title=choice.replace("_", " ").title(),
+                                    title=choice_text.replace("_", " ").title(),
                                     goal=(
                                         f"Show {route.name} with {model.label} "
-                                        f"records in the {choice} state."
+                                        f"records in the {choice_text} state."
                                     ),
                                     description=(
                                         f"State derived from {model.label}."
-                                        f"{field.name}={choice}"
+                                        f"{field.name}={choice_text}"
                                     ),
                                     params={"route_path": route.pattern},
                                     seed=SeedSpec(

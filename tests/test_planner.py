@@ -1,4 +1,7 @@
 from django_showcase.capture.compiler import CapturePlanCompiler
+from django_showcase.discovery.models import FieldMetadata, ModelMetadata
+from django_showcase.discovery.urls import RouteInfo
+from django_showcase.discovery.views import ViewMetadata
 from django_showcase.discovery.models import inspect_models
 from django_showcase.discovery.urls import discover_routes
 from django_showcase.discovery.views import inspect_views
@@ -34,3 +37,31 @@ def test_planner_generates_status_and_staff_scenarios(settings):
     assert pending.estimated_objects == 3
     assert len(pending.captures) == 2
     assert pending.route_path == "/orders/"
+
+
+def test_planner_handles_numeric_choices():
+    planner = ScenarioPlanner()
+    graph = planner.build_graph(
+        PlannerInputs(
+            routes=[
+                RouteInfo(
+                    name="orders",
+                    pattern="/orders/",
+                    module_id="orders",
+                    view_name="OrdersView",
+                )
+            ],
+            views=[ViewMetadata(route_name="orders", view_name="OrdersView")],
+            models=[
+                ModelMetadata(
+                    label="shop.Order",
+                    fields=[FieldMetadata(name="status", kind="IntegerField", choices=[1])],
+                )
+            ],
+            max_scenarios_per_module=8,
+            max_choices_per_field=4,
+        )
+    )
+
+    assert "orders.orders.1" in graph.scenarios
+    assert graph.scenarios["orders.orders.1"].title == "1"
