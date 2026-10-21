@@ -69,8 +69,21 @@ class Command(BaseCommand):
         parser.add_argument(
             "--only", nargs="*", default=[], help="Limit execution to specific modules."
         )
+        parser.add_argument(
+            "--log",
+            action="store_true",
+            help="Enable concise capture logs (user create/login/delete/fallback reasons).",
+        )
 
     def handle(self, *args, **options) -> None:
+        verbose_capture_logs = bool(options.get("log")) or int(
+            options.get("verbosity", 1)
+        ) >= 2
+
+        def capture_log(message: str) -> None:
+            if verbose_capture_logs:
+                self.stdout.write(f"[capture] {message}")
+
         config = ShowcaseConfig.from_settings()
         warnings = AgentWarningCollector()
 
@@ -206,6 +219,10 @@ class Command(BaseCommand):
             backend=config.capture_backend,
             base_url=config.capture_base_url,
             timeout_seconds=config.capture_timeout_seconds,
+            capture_username=config.capture_admin_username,
+            capture_password=config.capture_admin_password,
+            cleanup_temp_user=config.capture_cleanup_temp_user,
+            event_logger=capture_log,
         )
         scenario_mode = options["scenarios"] or config.scenario_mode
 
@@ -213,38 +230,41 @@ class Command(BaseCommand):
         seeded = 0
         capture_backends: set[str] = set()
         seed_strategy = options["seed_strategy"] or config.agentic_seed_strategy
-        with scenario_runtime(enabled=scenario_mode) as session:
-            executor = SeedExecutor(session)
-            schema_summary = build_schema_summary() if agentic else {}
-            for plan in plans:
-                scenario = graph.scenarios[plan.scenario]
-                with scenario_transaction(session):
-                    if agentic and (seed_strategy == "all_pages" or scenario.goal):
-                        goal = scenario.goal or (
-                            "Show a realistic demo state for route "
-                            f"{scenario.route}."
-                        )
-                        seed_plan = safe_plan_seed(
-                            agentic,
-                            SeedPlanningRequest(
-                                scenario_id=scenario.id,
-                                goal=goal,
-                                schema_summary=schema_summary,
-                            ),
-                            fallback=scenario.seed.compile() if scenario.seed else None,
-                            warnings=warnings,
-                        )
-                        if seed_plan is not None:
+        try:
+            with scenario_runtime(enabled=scenario_mode) as session:
+                executor = SeedExecutor(session)
+                schema_summary = build_schema_summary() if agentic else {}
+                for plan in plans:
+                    scenario = graph.scenarios[plan.scenario]
+                    with scenario_transaction(session):
+                        if agentic and (seed_strategy == "all_pages" or scenario.goal):
+                            goal = scenario.goal or (
+                                "Show a realistic demo state for route "
+                                f"{scenario.route}."
+                            )
+                            seed_plan = safe_plan_seed(
+                                agentic,
+                                SeedPlanningRequest(
+                                    scenario_id=scenario.id,
+                                    goal=goal,
+                                    schema_summary=schema_summary,
+                                ),
+                                fallback=scenario.seed.compile() if scenario.seed else None,
+                                warnings=warnings,
+                            )
+                            if seed_plan is not None:
+                                seeded += executor.execute(seed_plan).objects_created
+                        elif scenario.seed:
+                            seed_plan = validator.validate(scenario.seed.compile())
                             seeded += executor.execute(seed_plan).objects_created
-                    elif scenario.seed:
-                        seed_plan = validator.validate(scenario.seed.compile())
-                        seeded += executor.execute(seed_plan).objects_created
-                    capture_result = capture_engine.execute(
-                        plan, config.screenshots_dir
-                    )
-                    capture_backends.add(capture_result.backend_used)
-                    warnings.messages.extend(capture_result.warnings)
-                    created.extend(capture_result.created_paths)
+                        capture_result = capture_engine.execute(
+                            plan, config.screenshots_dir
+                        )
+                        capture_backends.add(capture_result.backend_used)
+                        warnings.messages.extend(capture_result.warnings)
+                        created.extend(capture_result.created_paths)
+        finally:
+            capture_engine.cleanup_temp_user()
 
         manifest = write_manifest(
             config.output_dir / "manifest.json",

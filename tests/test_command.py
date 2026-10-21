@@ -1,4 +1,5 @@
 import json
+from io import StringIO
 from pathlib import Path
 
 from django.core.management import call_command
@@ -82,3 +83,14 @@ def test_showcase_supports_parallel_frontend_dirs(settings, tmp_path: Path):
 
     manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
     assert manifest["frontend"]["routes"] == 2
+
+
+def test_showcase_log_flag_prints_capture_events(settings, tmp_path: Path):
+    settings.SHOWCASE = {"OUTPUT_DIR": tmp_path / ".showcase"}
+    stdout = StringIO()
+
+    call_command("showcase", log=True, stdout=stdout)
+
+    output = stdout.getvalue()
+    assert "[capture]" in output
+    assert "fallback placeholder" in output
