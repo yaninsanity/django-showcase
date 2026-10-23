@@ -10,7 +10,9 @@ class CapturePlanCompiler:
         plans: list[CapturePlan] = []
         for scenario in graph.scenarios.values():
             seed_plan = scenario.seed.compile() if scenario.seed else None
-            estimated_objects = sum(item.count for item in seed_plan.models) if seed_plan else 0
+            estimated_objects = (
+                sum(item.count for item in seed_plan.models) if seed_plan else 0
+            )
             output_key = scenario.id.replace(".", "__")
             captures: list[CaptureTarget] = []
             if scenario.capture.desktop:
@@ -37,10 +39,30 @@ class CapturePlanCompiler:
                     module=scenario.module,
                     scenario=scenario.id,
                     route=scenario.route,
-                    route_path=scenario.params.get("route_path") if scenario.params else None,
+                    route_path=scenario.params.get("route_path")
+                    if scenario.params
+                    else None,
                     actor=scenario.actor,
                     seed_provider="deterministic" if scenario.seed else "existing",
                     estimated_objects=estimated_objects,
+                    route_source=(
+                        str(scenario.params.get("route_source", "backend"))
+                        if scenario.params
+                        else "backend"
+                    ),
+                    is_get_supported=(
+                        bool(scenario.params.get("is_get_supported", True))
+                        if scenario.params
+                        else True
+                    ),
+                    allowed_methods=(
+                        tuple(
+                            str(method).lower()
+                            for method in scenario.params.get("allowed_methods", [])
+                        )
+                        if scenario.params
+                        else ()
+                    ),
                     captures=captures,
                 )
             )

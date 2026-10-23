@@ -5,7 +5,13 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from django_showcase.seed.plan import ActorSeed, ModelSeed, RelationshipSeed, SeedAssertion, SeedPlan
+from django_showcase.seed.plan import (
+    ActorSeed,
+    ModelSeed,
+    RelationshipSeed,
+    SeedAssertion,
+    SeedPlan,
+)
 
 
 def plan_cache_key(provider: str, goal: str, schema_summary: dict[str, object]) -> str:
@@ -29,7 +35,9 @@ class SeedPlanCache:
         return SeedPlan(
             models=[ModelSeed(**item) for item in data.get("models", [])],
             actor=ActorSeed(**data["actor"]) if data.get("actor") else None,
-            relationships=[RelationshipSeed(**item) for item in data.get("relationships", [])],
+            relationships=[
+                RelationshipSeed(**item) for item in data.get("relationships", [])
+            ],
             assertions=[SeedAssertion(**item) for item in data.get("assertions", [])],
         )
 

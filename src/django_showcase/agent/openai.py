@@ -30,10 +30,13 @@ class OpenAIAgentProvider:
             from openai import OpenAI
         except ImportError as exc:
             raise ImproperlyConfigured(
-                'The OpenAI provider requires the ai extra: pip install "django-showcase[ai]"'
+                "The OpenAI provider requires the ai extra: "
+                'pip install "django-showcase[ai]"'
             ) from exc
         if not os.environ.get("OPENAI_API_KEY"):
-            raise ImproperlyConfigured("OPENAI_API_KEY is required for --agentic with provider=openai.")
+            raise ImproperlyConfigured(
+                "OPENAI_API_KEY is required for --agentic with " "provider=openai."
+            )
         self._client = OpenAI(timeout=timeout_seconds, max_retries=max_retries)
         self._model = model
         self._prompts = prompts or PromptBundle()
@@ -42,11 +45,16 @@ class OpenAIAgentProvider:
         response = self._client.responses.create(
             model=self._model,
             instructions=self._prompts.seed_planner_system,
-            input=render_seed_planner_prompt(request, template=self._prompts.seed_planner_user),
+            input=render_seed_planner_prompt(
+                request,
+                template=self._prompts.seed_planner_user,
+            ),
         )
         return parse_seed_plan(response.output_text)
 
-    def plan_frontend_routes(self, framework: str, snippets: str) -> list[FrontendRoute]:
+    def plan_frontend_routes(
+        self, framework: str, snippets: str
+    ) -> list[FrontendRoute]:
         response = self._client.responses.create(
             model=self._model,
             instructions=self._prompts.frontend_route_system,
@@ -74,7 +82,10 @@ def parse_seed_plan(raw: str) -> SeedPlan:
             for item in data.get("models", [])
         ],
         relationships=[
-            RelationshipSeed(source=str(item["source"]), target=str(item["target"]))
+            RelationshipSeed(
+                source=str(item["source"]),
+                target=str(item["target"]),
+            )
             for item in data.get("relationships", [])
         ],
     )

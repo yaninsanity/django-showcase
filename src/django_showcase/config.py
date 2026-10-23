@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -25,7 +25,11 @@ class ShowcaseConfig:
     agent_max_retries: int = 2
     capture_backend: Literal["auto", "playwright", "placeholder"] = "auto"
     capture_base_url: str | None = None
+    frontend_base_url: str | None = None
     capture_timeout_seconds: float = 20.0
+    capture_admin_username: str = "showcaseuser"
+    capture_admin_password: str = "showcaseuser"
+    capture_cleanup_temp_user: bool = True
     agentic_seed_strategy: Literal["goal_only", "all_pages"] = "all_pages"
     archive_filename: str = "showcase.zip"
     prompt_overrides: dict[str, str] | None = None
@@ -36,7 +40,9 @@ class ShowcaseConfig:
         raw = getattr(settings, "SHOWCASE", {})
         base_dir = Path(raw.get("OUTPUT_DIR", ".showcase"))
         frontend_dir = Path(raw.get("FRONTEND_DIR", getattr(settings, "BASE_DIR", ".")))
-        frontend_dirs = [Path(item) for item in raw.get("FRONTEND_DIRS", [])] or [frontend_dir]
+        frontend_dirs = [Path(item) for item in raw.get("FRONTEND_DIRS", [])] or [
+            frontend_dir
+        ]
         prompt_overrides = dict(raw.get("PROMPTS", {}))
         prompt_file = raw.get("PROMPT_FILE")
         if prompt_file:
@@ -57,7 +63,11 @@ class ShowcaseConfig:
             agent_max_retries=raw.get("AGENT_MAX_RETRIES", 2),
             capture_backend=raw.get("CAPTURE_BACKEND", "auto"),
             capture_base_url=raw.get("CAPTURE_BASE_URL"),
+            frontend_base_url=raw.get("FRONTEND_BASE_URL"),
             capture_timeout_seconds=raw.get("CAPTURE_TIMEOUT_SECONDS", 20.0),
+            capture_admin_username=raw.get("CAPTURE_ADMIN_USERNAME", "showcaseuser"),
+            capture_admin_password=raw.get("CAPTURE_ADMIN_PASSWORD", "showcaseuser"),
+            capture_cleanup_temp_user=raw.get("CAPTURE_CLEANUP_TEMP_USER", True),
             agentic_seed_strategy=raw.get("AGENTIC_SEED_STRATEGY", "all_pages"),
             archive_filename=raw.get("ARCHIVE_FILENAME", "showcase.zip"),
             prompt_overrides=prompt_overrides,

@@ -9,10 +9,12 @@ from django_showcase.agent.base import SeedPlanningRequest
 SEED_PLANNER_SYSTEM = (
     "You are a seed-data planner for a Django product showcase. "
     "Respond with a single JSON object matching this schema and nothing else: "
-    '{"models": [{"model": "<app_label.ModelName>", "count": <int>, "fields": {"<field>": <value>}}], '
-    '"relationships": [{"source": "<app_label.Model.field>", "target": "<app_label.Model>"}]}. '
+    '{"models": [{"model": "<app_label.ModelName>", "count": <int>, "fields": '
+    '{"<field>": <value>}}], "relationships": [{"source": '
+    '"<app_label.Model.field>", "target": "<app_label.Model>"}]}. '
     "Counts must be realistic and small. "
-    "Never emit SQL, Python code, shell commands, or model names absent from the provided schema."
+    "Never emit SQL, Python code, shell commands, or model names absent from "
+    "the provided schema."
 )
 
 SEED_PLANNER_USER = """Scenario: {scenario_id}
@@ -26,7 +28,8 @@ Available schema (the only models and fields you may reference):
 
 FRONTEND_ROUTE_SYSTEM = (
     "You extract user-facing routes from frontend source code for a product showcase. "
-    'Respond with a single JSON object and nothing else: {"routes": [{"path": "/orders"}]}. '
+    "Respond with a single JSON object and nothing else: "
+    '{"routes": [{"path": "/orders"}]}. '
     "Only include routes literally present in the source. "
     "Never include parameterized, wildcard, or invented routes."
 )
@@ -49,18 +52,30 @@ class PromptBundle:
     def from_overrides(cls, overrides: dict[str, str] | None = None) -> "PromptBundle":
         overrides = overrides or {}
         return cls(
-            seed_planner_system=overrides.get("seed_planner_system", SEED_PLANNER_SYSTEM),
+            seed_planner_system=overrides.get(
+                "seed_planner_system", SEED_PLANNER_SYSTEM
+            ),
             seed_planner_user=overrides.get("seed_planner_user", SEED_PLANNER_USER),
-            frontend_route_system=overrides.get("frontend_route_system", FRONTEND_ROUTE_SYSTEM),
-            frontend_route_user=overrides.get("frontend_route_user", FRONTEND_ROUTE_USER),
+            frontend_route_system=overrides.get(
+                "frontend_route_system", FRONTEND_ROUTE_SYSTEM
+            ),
+            frontend_route_user=overrides.get(
+                "frontend_route_user", FRONTEND_ROUTE_USER
+            ),
         )
 
 
-def render_seed_planner_prompt(request: SeedPlanningRequest, template: str = SEED_PLANNER_USER) -> str:
+def render_seed_planner_prompt(
+    request: SeedPlanningRequest, template: str = SEED_PLANNER_USER
+) -> str:
     return template.format(
         scenario_id=request.scenario_id,
         goal=request.goal.strip(),
-        schema=json.dumps(request.schema_summary, indent=2, sort_keys=True),
+        schema=json.dumps(
+            request.schema_summary,
+            indent=2,
+            sort_keys=True,
+        ),
     )
 
 

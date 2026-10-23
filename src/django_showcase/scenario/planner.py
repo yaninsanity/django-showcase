@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 from django_showcase.discovery.models import ModelMetadata
 from django_showcase.discovery.urls import RouteInfo
@@ -51,14 +51,17 @@ class ScenarioPlanner:
             deduped = _dedupe_scenarios(candidates)
             graph.module_candidate_counts[module_id] = len(deduped)
             baseline_ids = {
-                scenario.id
-                for scenario in deduped
-                if scenario.id.endswith(".default")
+                scenario.id for scenario in deduped if scenario.id.endswith(".default")
             }
             baseline = [scenario for scenario in deduped if scenario.id in baseline_ids]
-            extras = [scenario for scenario in deduped if scenario.id not in baseline_ids]
+            extras = [
+                scenario for scenario in deduped if scenario.id not in baseline_ids
+            ]
             extra_limit = max(0, inputs.max_scenarios_per_module - len(baseline))
-            selected = baseline + sorted(extras, key=score_scenario, reverse=True)[:extra_limit]
+            selected = (
+                baseline
+                + sorted(extras, key=score_scenario, reverse=True)[:extra_limit]
+            )
             for scenario in selected:
                 graph.scenarios[scenario.id] = scenario
 
@@ -80,7 +83,12 @@ class ScenarioPlanner:
             title="Default",
             goal=f"Show the default state for {route.name}.",
             description=f"Default state for {route.name}",
-            params={"route_path": route.pattern},
+            params={
+                "route_path": route.pattern,
+                "route_source": route.route_source,
+                "is_get_supported": route.is_get_supported,
+                "allowed_methods": list(route.allowed_methods),
+            },
         )
         scenarios = [base, self._empty_scenario(route)]
 
@@ -94,7 +102,12 @@ class ScenarioPlanner:
                     actor="staff",
                     goal=f"Show the staff-visible state for {route.name}.",
                     description=f"Staff access state for {route.name}",
-                    params={"route_path": route.pattern},
+                    params={
+                        "route_path": route.pattern,
+                        "route_source": route.route_source,
+                        "is_get_supported": route.is_get_supported,
+                        "allowed_methods": list(route.allowed_methods),
+                    },
                 )
             )
             scenarios.append(
@@ -106,7 +119,12 @@ class ScenarioPlanner:
                     actor="anonymous",
                     goal=f"Show the unauthorized state for {route.name}.",
                     description=f"Unauthorized access state for {route.name}",
-                    params={"route_path": route.pattern},
+                    params={
+                        "route_path": route.pattern,
+                        "route_source": route.route_source,
+                        "is_get_supported": route.is_get_supported,
+                        "allowed_methods": list(route.allowed_methods),
+                    },
                 )
             )
 
@@ -116,15 +134,27 @@ class ScenarioPlanner:
                 for field in model.fields:
                     if field.choices:
                         for choice in field.choices[:max_choices_per_field]:
+                            choice_text = str(choice)
                             scenarios.append(
                                 Scenario(
                                     id=f"{module_id}.{route_key}.{choice}",
                                     module=module_id,
                                     route=route.name,
-                                    title=choice.replace("_", " ").title(),
-                                    goal=f"Show {route.name} with {model.label} records in the {choice} state.",
-                                    description=f"State derived from {model.label}.{field.name}={choice}",
-                                    params={"route_path": route.pattern},
+                                    title=choice_text.replace("_", " ").title(),
+                                    goal=(
+                                        f"Show {route.name} with {model.label} "
+                                        f"records in the {choice_text} state."
+                                    ),
+                                    description=(
+                                        f"State derived from {model.label}."
+                                        f"{field.name}={choice_text}"
+                                    ),
+                                    params={
+                                        "route_path": route.pattern,
+                                        "route_source": route.route_source,
+                                        "is_get_supported": route.is_get_supported,
+                                        "allowed_methods": list(route.allowed_methods),
+                                    },
                                     seed=SeedSpec(
                                         models=[
                                             ModelSeed(
@@ -147,7 +177,12 @@ class ScenarioPlanner:
             title="Empty Dataset",
             goal=f"Show the empty dataset state for {route.name}.",
             description=f"No business data for {route.name}",
-            params={"route_path": route.pattern},
+            params={
+                "route_path": route.pattern,
+                "route_source": route.route_source,
+                "is_get_supported": route.is_get_supported,
+                "allowed_methods": list(route.allowed_methods),
+            },
             seed=SeedSpec(plan=SeedPlan(models=[])),
         )
 
@@ -159,7 +194,12 @@ class ScenarioPlanner:
             title="High Volume",
             goal=f"Show a busy, high-volume state for {route.name}.",
             description=f"Large demo dataset for {route.name}",
-            params={"route_path": route.pattern},
+            params={
+                "route_path": route.pattern,
+                "route_source": route.route_source,
+                "is_get_supported": route.is_get_supported,
+                "allowed_methods": list(route.allowed_methods),
+            },
             seed=SeedSpec(models=[ModelSeed(model=model_label, count=25)]),
         )
 

@@ -49,6 +49,9 @@ INSTALLED_APPS = [
 python manage.py showcase
 python manage.py showcase --plan
 python manage.py showcase --only orders
+python manage.py showcase --skip admin
+python manage.py showcase --frontend
+python manage.py showcase --backend
 python manage.py showcase --agentic
 python manage.py showcase --scenarios
 ```
@@ -61,6 +64,7 @@ SHOWCASE = {
   "FRONTEND_DIRS": ["backend_ui/", "frontend_ui/"],  # optional parallel roots
   "CAPTURE_BACKEND": "auto",  # auto | playwright | placeholder
   "CAPTURE_BASE_URL": "http://127.0.0.1:8000",  # required for real browser captures
+  "FRONTEND_BASE_URL": "http://127.0.0.1:5173",  # optional frontend runtime URL for SPA captures
   "CAPTURE_TIMEOUT_SECONDS": 20.0,
   "AGENT_PROVIDER": "openai",
   "AGENT_MODEL": "gpt-4.1-mini",
@@ -85,6 +89,7 @@ Additional CLI controls:
 python manage.py showcase --agentic --frontend-dir ../frontend --frontend-dir ../admin-frontend
 python manage.py showcase --agentic --prompt-file .showcase/prompts.json
 python manage.py showcase --agentic --seed-strategy all_pages
+python manage.py showcase --only orders admin --skip admin
 ```
 
 Default output:
@@ -95,8 +100,15 @@ Default output:
 ├── report/
 │   ├── index.html
 │   └── scenarios/
+├── skipped/
+│   ├── backend/<module>/<scenario>/skip_reason.txt
+│   └── frontend/<module>/<scenario>/skip_reason.txt
 └── screenshots/
+  ├── backend/
+  └── frontend/
 ```
+
+When running only one source (`--frontend` or `--backend`), captures and skipped records are written directly under that source root without the extra backend/frontend split folder.
 
 ## Frontend compatibility
 

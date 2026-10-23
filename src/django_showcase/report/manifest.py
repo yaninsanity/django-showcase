@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import json
 
 from django_showcase.capture.plan import CapturePlan
 from django_showcase.discovery.frontend import FrontendInfo
@@ -13,6 +13,7 @@ from django_showcase.scenario.scenario import Scenario
 @dataclass(slots=True)
 class ManifestScenario:
     scenario: str
+    module: str
     title: str
     route: str
     actor: str | None
@@ -36,12 +37,16 @@ def write_manifest(
         "project": context.project_name if context else None,
         "frontend": {
             "framework": frontend.framework,
-            "profile": frontend.profile.name if frontend.profile else frontend.framework,
+            "profile": frontend.profile.name
+            if frontend.profile
+            else frontend.framework,
             "roots": frontend.roots,
             "routes": len(frontend.routes),
             "router_files": frontend.router_files,
             "components": len(frontend.components),
-            "component_files": [component.file_path for component in frontend.components],
+            "component_files": [
+                component.file_path for component in frontend.components
+            ],
         }
         if frontend
         else None,
@@ -62,17 +67,22 @@ def write_manifest(
             asdict(
                 ManifestScenario(
                     scenario=plan.scenario,
-                    title=(scenarios or {}).get(plan.scenario).title if scenarios else plan.scenario,
+                    module=plan.module,
+                    title=(scenarios or {}).get(plan.scenario).title
+                    if scenarios
+                    else plan.scenario,
                     route=plan.route,
                     actor=plan.actor,
-                    goal=(scenarios or {}).get(plan.scenario).goal if scenarios else None,
+                    goal=(scenarios or {}).get(plan.scenario).goal
+                    if scenarios
+                    else None,
                     seed_provider=plan.seed_provider,
                     estimated_objects=plan.estimated_objects,
                     captures=[asdict(target) for target in plan.captures],
                 )
             )
             for plan in plans
-        ]
+        ],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

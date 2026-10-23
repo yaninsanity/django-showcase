@@ -12,7 +12,13 @@ def test_seed_creates_demo_data_and_rolls_back():
         executor = SeedExecutor(session)
         with scenario_transaction(session):
             result = executor.execute(
-                SeedPlan(models=[ModelSeed(model="shop.Order", count=3, fields={"status": "pending"})])
+                SeedPlan(
+                    models=[
+                        ModelSeed(
+                            model="shop.Order", count=3, fields={"status": "pending"}
+                        )
+                    ]
+                )
             )
             assert result.objects_created == 3
             assert Order.objects.filter(status="pending").count() == 3
