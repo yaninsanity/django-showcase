@@ -21,3 +21,8 @@ class CapturePlan:
     seed_provider: str
     estimated_objects: int
     captures: list[CaptureTarget] = field(default_factory=list)
+    route_source: str = "backend"
+    is_get_supported: bool = True
+    allowed_methods: tuple[str, ...] = ()
+    skipped: bool = False
+    skipped_reason: str | None = None

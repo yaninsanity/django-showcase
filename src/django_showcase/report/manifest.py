@@ -13,6 +13,7 @@ from django_showcase.scenario.scenario import Scenario
 @dataclass(slots=True)
 class ManifestScenario:
     scenario: str
+    module: str
     title: str
     route: str
     actor: str | None
@@ -66,6 +67,7 @@ def write_manifest(
             asdict(
                 ManifestScenario(
                     scenario=plan.scenario,
+                    module=plan.module,
                     title=(scenarios or {}).get(plan.scenario).title
                     if scenarios
                     else plan.scenario,

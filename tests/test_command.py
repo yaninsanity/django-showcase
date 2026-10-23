@@ -12,14 +12,12 @@ def test_showcase_command_writes_manifest_and_report(settings, tmp_path: Path):
 
     assert (tmp_path / ".showcase" / "manifest.json").exists()
     assert (tmp_path / ".showcase" / "report" / "index.html").exists()
-    assert (
-        tmp_path
-        / ".showcase"
-        / "screenshots"
-        / "orders"
-        / "orders__orders__pending"
-        / "desktop.png"
-    ).exists()
+    order_shots = list(
+        (tmp_path / ".showcase" / "screenshots" / "backend" / "orders").glob(
+            "**/desktop.png"
+        )
+    )
+    assert order_shots
     assert (tmp_path / ".showcase" / "showcase.zip").exists()
 
 
@@ -51,6 +49,9 @@ def test_showcase_manifest_includes_frontend_summary(settings, tmp_path: Path):
         "placeholder",
         "playwright",
         "playwright+placeholder",
+        "placeholder+skipped",
+        "playwright+skipped",
+        "playwright+placeholder+skipped",
     }
     assert manifest["frontend"]["profile"] == "react"
     assert any(module["module"] == "billing" for module in manifest["modules"])
@@ -94,3 +95,82 @@ def test_showcase_log_flag_prints_capture_events(settings, tmp_path: Path):
     output = stdout.getvalue()
     assert "[capture]" in output
     assert "fallback placeholder" in output
+
+
+def test_showcase_skip_excludes_admin_module(settings, tmp_path: Path):
+    settings.SHOWCASE = {"OUTPUT_DIR": tmp_path / ".showcase"}
+
+    call_command("showcase", plan=True, skip=["admin"])
+
+    manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
+    assert all(module["module"] != "admin" for module in manifest["modules"])
+    assert all(scenario["module"] != "admin" for scenario in manifest["scenarios"])
+
+
+def test_showcase_only_and_skip_can_be_combined(settings, tmp_path: Path):
+    settings.SHOWCASE = {"OUTPUT_DIR": tmp_path / ".showcase"}
+
+    call_command("showcase", plan=True, only=["orders", "admin"], skip=["admin"])
+
+    manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
+    modules = {module["module"] for module in manifest["modules"]}
+    assert "admin" not in modules
+    assert modules <= {"orders"}
+
+
+def test_showcase_frontend_only_filters_backend_routes(settings, tmp_path: Path):
+    frontend_dir = tmp_path / "frontend"
+    src = frontend_dir / "src"
+    src.mkdir(parents=True)
+    (frontend_dir / "package.json").write_text(
+        json.dumps({"dependencies": {"react": "^18.0.0"}})
+    )
+    (src / "appRoutes.tsx").write_text('const routes = [{path: "/billing"}]')
+    settings.SHOWCASE = {
+        "OUTPUT_DIR": tmp_path / ".showcase",
+        "FRONTEND_DIR": frontend_dir,
+    }
+
+    call_command("showcase", plan=True, frontend=True)
+
+    manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
+    assert manifest["scenarios"]
+    assert all(scenario["route"].startswith("billing") for scenario in manifest["scenarios"])
+
+
+def test_showcase_backend_only_filters_frontend_routes(settings, tmp_path: Path):
+    frontend_dir = tmp_path / "frontend"
+    src = frontend_dir / "src"
+    src.mkdir(parents=True)
+    (frontend_dir / "package.json").write_text(
+        json.dumps({"dependencies": {"react": "^18.0.0"}})
+    )
+    (src / "appRoutes.tsx").write_text('const routes = [{path: "/billing"}]')
+    settings.SHOWCASE = {
+        "OUTPUT_DIR": tmp_path / ".showcase",
+        "FRONTEND_DIR": frontend_dir,
+    }
+
+    call_command("showcase", plan=True, backend=True)
+
+    manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
+    assert all(scenario["module"] != "billing" for scenario in manifest["scenarios"])
+
+
+def test_showcase_screenshots_split_by_source_when_mixed(settings, tmp_path: Path):
+    frontend_dir = tmp_path / "frontend"
+    src = frontend_dir / "src"
+    src.mkdir(parents=True)
+    (frontend_dir / "package.json").write_text(
+        json.dumps({"dependencies": {"react": "^18.0.0"}})
+    )
+    (src / "appRoutes.tsx").write_text('const routes = [{path: "/billing"}]')
+    settings.SHOWCASE = {
+        "OUTPUT_DIR": tmp_path / ".showcase",
+        "FRONTEND_DIR": frontend_dir,
+    }
+
+    call_command("showcase")
+
+    assert (tmp_path / ".showcase" / "screenshots" / "backend").exists()
+    assert (tmp_path / ".showcase" / "screenshots" / "frontend").exists()

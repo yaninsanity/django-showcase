@@ -45,6 +45,24 @@ class CapturePlanCompiler:
                     actor=scenario.actor,
                     seed_provider="deterministic" if scenario.seed else "existing",
                     estimated_objects=estimated_objects,
+                    route_source=(
+                        str(scenario.params.get("route_source", "backend"))
+                        if scenario.params
+                        else "backend"
+                    ),
+                    is_get_supported=(
+                        bool(scenario.params.get("is_get_supported", True))
+                        if scenario.params
+                        else True
+                    ),
+                    allowed_methods=(
+                        tuple(
+                            str(method).lower()
+                            for method in scenario.params.get("allowed_methods", [])
+                        )
+                        if scenario.params
+                        else ()
+                    ),
                     captures=captures,
                 )
             )

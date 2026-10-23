@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -21,6 +22,12 @@ class CaptureResult:
     created_paths: list[str] = field(default_factory=list)
     backend_used: str = "placeholder"
     warnings: list[str] = field(default_factory=list)
+    skipped: bool = False
+    skipped_reason: str | None = None
+
+
+class CaptureError(RuntimeError):
+    """Raised when real browser capture is requested but cannot run safely."""
 
 
 class CaptureEngine:
@@ -28,18 +35,25 @@ class CaptureEngine:
         self,
         backend: Literal["auto", "playwright", "placeholder"] = "auto",
         base_url: str | None = None,
+        frontend_base_url: str | None = None,
         timeout_seconds: float = 20.0,
         capture_username: str = "showcaseuser",
         capture_password: str = "showcaseuser",
         cleanup_temp_user: bool = True,
+        skipped_dir: Path | None = None,
+        split_sources: bool = False,
         event_logger: Callable[[str], None] | None = None,
     ) -> None:
         self.backend = backend
         self.base_url = base_url
+        self.frontend_base_url = frontend_base_url
         self.timeout_seconds = timeout_seconds
         self.capture_username = capture_username
         self.capture_password = capture_password
         self.cleanup_temp_user_enabled = cleanup_temp_user
+        self.skipped_dir = skipped_dir
+        self.split_sources = split_sources
+        self._seen_capture_urls: set[str] = set()
         self._temp_user_created = False
         self._event_logger = event_logger
 
@@ -48,6 +62,26 @@ class CaptureEngine:
             self._event_logger(message)
 
     def execute(self, plan: CapturePlan, output_dir: Path) -> CaptureResult:
+        heuristic_reason = self._heuristic_skip_reason(plan)
+        if heuristic_reason is not None:
+            self._record_skip(plan, output_dir, heuristic_reason)
+            return CaptureResult(
+                backend_used="skipped",
+                skipped=True,
+                skipped_reason=heuristic_reason,
+            )
+
+        dedupe_key = self._dedupe_key(plan)
+        if dedupe_key in self._seen_capture_urls:
+            reason = "duplicate url"
+            self._record_skip(plan, output_dir, reason)
+            return CaptureResult(
+                backend_used="skipped",
+                skipped=True,
+                skipped_reason=reason,
+            )
+        self._seen_capture_urls.add(dedupe_key)
+
         if self.backend == "placeholder":
             return self._execute_placeholder(
                 plan,
@@ -57,21 +91,12 @@ class CaptureEngine:
         if self.backend == "playwright":
             return self._execute_playwright(plan, output_dir)
 
-        if self.base_url:
-            result = self._execute_playwright(plan, output_dir)
-            if result.backend_used == "playwright":
-                return result
-            fallback = self._execute_placeholder(
-                plan,
-                output_dir,
-                reason=f"auto fallback after playwright failure: {result.warnings}",
-            )
-            fallback.warnings.extend(result.warnings)
-            return fallback
+        if self._select_base_url(plan):
+            return self._execute_playwright(plan, output_dir)
         return self._execute_placeholder(
             plan,
             output_dir,
-            reason="CAPTURE_BASE_URL is not set; placeholder is active",
+            reason="capture base URL is not set; placeholder is active",
         )
 
     def _execute_placeholder(
@@ -104,10 +129,12 @@ class CaptureEngine:
         return CaptureResult(created_paths=created, backend_used="placeholder")
 
     def _execute_playwright(self, plan: CapturePlan, output_dir: Path) -> CaptureResult:
-        if not self.base_url:
+        if not self._select_base_url(plan):
             return CaptureResult(
                 backend_used="placeholder",
-                warnings=["CAPTURE_BASE_URL is not set; using placeholder captures."],
+                warnings=[
+                    f"capture base URL is not set for route_source={plan.route_source}; using placeholder captures."
+                ],
             )
         if not self._ensure_playwright_runtime():
             return CaptureResult(
@@ -141,21 +168,56 @@ class CaptureEngine:
                 context = browser.new_context()
                 page = context.new_page()
                 page.set_default_timeout(int(self.timeout_seconds * 1000))
+                probe_status = self._probe_page_status(page, target_url)
+                if probe_status is not None:
+                    reason = self._http_skip_reason(probe_status)
+                    if reason is not None:
+                        self._record_skip(plan, output_dir, reason)
+                        context.close()
+                        browser.close()
+                        return CaptureResult(
+                            backend_used="playwright",
+                            warnings=warnings,
+                            skipped=True,
+                            skipped_reason=reason,
+                        )
+
+                if not self._is_renderable_page(page):
+                    reason = "non-renderable route"
+                    self._record_skip(plan, output_dir, reason)
+                    context.close()
+                    browser.close()
+                    return CaptureResult(
+                        backend_used="playwright",
+                        warnings=warnings,
+                        skipped=True,
+                        skipped_reason=reason,
+                    )
+
                 for target in plan.captures:
                     page.set_viewport_size(
                         {"width": target.width, "height": target.height}
                     )
                     page.goto(target_url, wait_until="networkidle")
-                    logged_in = self._login_if_needed(page)
-                    if logged_in:
+                    if self._should_skip_auto_login(target_url, plan):
                         self._log(
-                            f"login submitted for scenario={plan.scenario} user={self.capture_username}"
+                            f"skip auto login for auth page scenario={plan.scenario} url={target_url}"
                         )
-                        login_result = self._diagnose_login_result(page)
-                        if login_result:
+                    else:
+                        if plan.route_source == "frontend":
                             self._log(
-                                f"login status for scenario={plan.scenario}: {login_result}"
+                                f"frontend auth probe scenario={plan.scenario} url={target_url}"
                             )
+                        logged_in = self._login_if_needed(page, plan.route_source)
+                        if logged_in:
+                            self._log(
+                                f"{plan.route_source} login submitted for scenario={plan.scenario} user={self.capture_username}"
+                            )
+                            login_result = self._diagnose_login_result(page)
+                            if login_result:
+                                self._log(
+                                    f"{plan.route_source} login status for scenario={plan.scenario}: {login_result}"
+                                )
                     if page.url != target_url:
                         page.goto(target_url, wait_until="networkidle")
                     target_path = output_dir / target.output_path
@@ -307,61 +369,91 @@ class CaptureEngine:
             self._log(f"temp user cleanup failed username={self.capture_username}: {exc}")
             return
 
-    def _login_if_needed(self, page) -> bool:
+    def _login_if_needed(self, page, route_source: str = "backend") -> bool:
         username_selectors = [
             "input[name='username']",
             "input#id_username",
             "input[autocomplete='username']",
+            "input[name*='user' i]",
+            "input[id*='user' i]",
+            "input[placeholder*='username' i]",
+            "input[placeholder*='user' i]",
+            "input[placeholder*='email' i]",
+            "input[type='email']",
+            "input[type='text']",
+            "input:not([type])",
         ]
         password_selectors = [
             "input[name='password']",
             "input#id_password",
             "input[autocomplete='current-password']",
+            "input[name*='pass' i]",
+            "input[id*='pass' i]",
+            "input[placeholder*='password' i]",
+            "input[type='password']",
         ]
         submit_selectors = [
             "input[type='submit']",
             "button[type='submit']",
             "button:has-text('Log in')",
             "button:has-text('Sign in')",
+            "button:has-text('Login')",
+            "button:has-text('Submit')",
+            "button:has-text('Cook')",
         ]
 
-        username_field = next(
-            (
-                selector
-                for selector in username_selectors
-                if page.locator(selector).count() > 0
-            ),
-            None,
-        )
-        password_field = next(
-            (
-                selector
-                for selector in password_selectors
-                if page.locator(selector).count() > 0
-            ),
-            None,
-        )
+        self._log_login_diagnostics(page, route_source)
+
+        username_field = self._first_matching_selector(page, username_selectors)
+        password_field = self._first_matching_selector(page, password_selectors)
         if username_field is None or password_field is None:
-            self._log("login form not detected on page")
+            self._log(
+                f"{route_source} login form not detected on page "
+                f"(username={username_field}, password={password_field})"
+            )
             return False
 
-        page.locator(username_field).fill(self.capture_username)
-        page.locator(password_field).fill(self.capture_password)
+        page.locator(username_field).first.fill(self.capture_username)
+        page.locator(password_field).first.fill(self.capture_password)
 
-        submit_button = next(
-            (
-                selector
-                for selector in submit_selectors
-                if page.locator(selector).count() > 0
-            ),
-            None,
-        )
+        submit_button = self._first_matching_selector(page, submit_selectors)
         if submit_button is None:
-            self._log("login form detected but submit button not found")
-            return False
-        page.locator(submit_button).click()
+            self._log(
+                f"{route_source} login submit button not found; trying Enter key submit"
+            )
+            page.locator(password_field).first.press("Enter")
+            page.wait_for_load_state("networkidle")
+            return True
+
+        page.locator(submit_button).first.click()
         page.wait_for_load_state("networkidle")
         return True
+
+    def _first_matching_selector(self, page, selectors: list[str]) -> str | None:
+        for selector in selectors:
+            try:
+                if page.locator(selector).count() > 0:
+                    return selector
+            except Exception:
+                continue
+        return None
+
+    def _log_login_diagnostics(self, page, route_source: str) -> None:
+        try:
+            inputs = page.evaluate(
+                """() => {
+                    return Array.from(document.querySelectorAll('input')).slice(0, 12).map((el) => ({
+                        type: el.getAttribute('type') || 'text',
+                        name: el.getAttribute('name') || '',
+                        id: el.getAttribute('id') || '',
+                        placeholder: el.getAttribute('placeholder') || '',
+                        autocomplete: el.getAttribute('autocomplete') || ''
+                    }));
+                }"""
+            )
+            self._log(f"{route_source} login probe inputs={inputs}")
+        except Exception as exc:
+            self._log(f"{route_source} login probe failed: {exc}")
 
     def _diagnose_login_result(self, page) -> str | None:
         try:
@@ -392,10 +484,164 @@ class CaptureEngine:
         return "success"
 
     def _resolve_url(self, plan: CapturePlan) -> str:
-        base = (self.base_url or "").rstrip("/")
+        base = self._select_base_url(plan).rstrip("/")
         route_path = plan.route_path or plan.route
         if route_path.startswith("http://") or route_path.startswith("https://"):
             return route_path
         if not route_path.startswith("/"):
             route_path = "/" + route_path
         return base + route_path
+
+    def _select_base_url(self, plan: CapturePlan) -> str:
+        if plan.route_source == "frontend" and self.frontend_base_url:
+            return self.frontend_base_url
+        return self.base_url or ""
+
+    def _heuristic_skip_reason(self, plan: CapturePlan) -> str | None:
+        route_path = (plan.route_path or plan.route or "").lower()
+        if not route_path:
+            return "non-renderable route"
+
+        non_renderable_prefixes = (
+            "/api/",
+            "/v1/",
+            "/v2/",
+            "/ajax/",
+            "/graphql",
+        )
+        if any(route_path.startswith(prefix) for prefix in non_renderable_prefixes):
+            return "api endpoint"
+
+        if route_path.endswith((".json", ".xml", ".csv")):
+            return "api endpoint"
+
+        if re.search(r"\.(json|xml|csv)(/|$)", route_path):
+            return "api endpoint"
+
+        if self._is_delete_like_route(route_path):
+            return "mutation route"
+
+        if not plan.is_get_supported:
+            return "post-only"
+
+        if plan.allowed_methods:
+            method_set = {method.lower() for method in plan.allowed_methods}
+            if method_set.isdisjoint({"get", "head"}):
+                return "post-only"
+
+        return None
+
+    def _is_delete_like_route(self, route_path: str) -> bool:
+        return any(
+            token in route_path
+            for token in (
+                "/delete/",
+                "/remove/",
+                "/destroy/",
+                "/purge/",
+            )
+        )
+
+    def _probe_page_status(self, page, target_url: str) -> int | None:
+        try:
+            response = page.goto(target_url, wait_until="domcontentloaded")
+        except Exception as exc:
+            self._log(f"probe navigation failed url={target_url}: {exc}")
+            return None
+        if response is None:
+            return None
+        status_getter = getattr(response, "status", None)
+        if callable(status_getter):
+            try:
+                return int(status_getter())
+            except Exception:
+                return None
+        try:
+            return int(status_getter)
+        except Exception:
+            return None
+
+    def _http_skip_reason(self, status_code: int) -> str | None:
+        if status_code == 404:
+            return "404 not found"
+        if status_code == 405:
+            return "405 method not allowed"
+        if status_code == 403:
+            return "403 forbidden"
+        if status_code == 500:
+            return "500 server error"
+        if status_code in {200, 304}:
+            return None
+        if status_code >= 400:
+            return f"http {status_code}"
+        return None
+
+    def _is_renderable_page(self, page) -> bool:
+        try:
+            content_type = (page.evaluate("() => document.contentType") or "").lower()
+        except Exception:
+            content_type = ""
+
+        if content_type and "html" not in content_type:
+            return False
+
+        try:
+            text = (page.locator("body").inner_text() or "").strip()
+        except Exception:
+            text = ""
+        if not text:
+            return False
+
+        try:
+            html = (page.content() or "").lower()
+        except Exception:
+            html = ""
+        if "{\"detail\":" in html or "application/json" in html:
+            return False
+
+        return True
+
+    def _record_skip(self, plan: CapturePlan, output_dir: Path, reason: str) -> None:
+        self._log(
+            f"skip capture scenario={plan.scenario} route={plan.route} reason={reason}"
+        )
+        base_dir = self.skipped_dir or output_dir
+        if self.split_sources:
+            base_dir = base_dir / plan.route_source
+        reason_path = (
+            base_dir / plan.module / plan.scenario.replace(".", "__") / "skip_reason.txt"
+        )
+        reason_path.parent.mkdir(parents=True, exist_ok=True)
+        reason_path.write_text(
+            "\n".join(
+                [
+                    f"Scenario: {plan.scenario}",
+                    f"Route: {plan.route}",
+                    f"Route path: {plan.route_path or '-'}",
+                    f"Resolved URL: {self._resolve_url(plan)}",
+                    f"Reason: {reason}",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def _dedupe_key(self, plan: CapturePlan) -> str:
+        source = (plan.route_source or "backend").lower()
+        resolved = self._resolve_url(plan).strip().lower()
+        return f"{source}::{resolved}"
+
+    def _should_skip_auto_login(self, target_url: str, plan: CapturePlan) -> bool:
+        path = (plan.route_path or "").lower()
+        url = target_url.lower()
+        auth_tokens = (
+            "/login",
+            "/signin",
+            "/sign-in",
+            "/register",
+            "/signup",
+            "/sign-up",
+            "/auth/login",
+            "/auth/register",
+        )
+        return any(token in path or token in url for token in auth_tokens)

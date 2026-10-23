@@ -60,6 +60,7 @@ def test_login_if_needed_fills_admin_form_and_submits():
     class FakeLocator:
         def __init__(self, selector: str):
             self.selector = selector
+            self.first = self
 
         def count(self):
             return 1 if self.selector in {
@@ -74,9 +75,15 @@ def test_login_if_needed_fills_admin_form_and_submits():
         def click(self):
             calls.append(("click", self.selector, ""))
 
+        def press(self, key: str):
+            calls.append(("press", self.selector, key))
+
     class FakePage:
         def locator(self, selector: str):
             return FakeLocator(selector)
+
+        def evaluate(self, *_args, **_kwargs):
+            return []
 
         def wait_for_load_state(self, *_args, **_kwargs):
             return None
@@ -193,8 +200,19 @@ def test_playwright_reinstalls_missing_browser_and_retries(monkeypatch, tmp_path
 
         def goto(self, url: str, **_kwargs):
             self.url = url
+            return type("FakeResponse", (), {"status": lambda self: 200})()
 
         def locator(self, selector: str):
+            if selector == "body":
+                return type(
+                    "BodyLocator",
+                    (),
+                    {
+                        "count": lambda self: 1,
+                        "inner_text": lambda self: "Orders dashboard",
+                    },
+                )()
+
             class FakeLocator:
                 def __init__(self, selector: str):
                     self.selector = selector
@@ -209,6 +227,12 @@ def test_playwright_reinstalls_missing_browser_and_retries(monkeypatch, tmp_path
                     return None
 
             return FakeLocator(selector)
+
+        def evaluate(self, *_args, **_kwargs):
+            return "text/html"
+
+        def content(self):
+            return "<html><body>Orders dashboard</body></html>"
 
         def screenshot(self, path: str, **_kwargs):
             Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -276,3 +300,240 @@ def test_playwright_reinstalls_missing_browser_and_retries(monkeypatch, tmp_path
     assert result.created_paths
     assert (tmp_path / "orders/pending/desktop.png").read_bytes() == b"actual-png"
     assert launch_count["value"] == 2
+
+
+def test_safe_capture_heuristic_skips_api_endpoints(tmp_path: Path):
+    plan = CapturePlan(
+        module="api",
+        scenario="api.list.default",
+        route="api:list",
+        route_path="/api/orders/",
+        actor=None,
+        seed_provider="existing",
+        estimated_objects=0,
+        captures=[
+            CaptureTarget(
+                viewport="desktop",
+                width=800,
+                height=600,
+                output_path="api/list/desktop.png",
+            )
+        ],
+    )
+    result = CaptureEngine(backend="auto", base_url="http://localhost:8000").execute(
+        plan, tmp_path
+    )
+
+    assert result.skipped is True
+    assert result.skipped_reason == "api endpoint"
+    assert not result.created_paths
+
+
+def test_safe_capture_heuristic_skips_post_only_route(tmp_path: Path):
+    plan = CapturePlan(
+        module="orders",
+        scenario="orders.submit.default",
+        route="orders-submit",
+        route_path="/orders/submit/",
+        actor=None,
+        seed_provider="existing",
+        estimated_objects=0,
+        is_get_supported=False,
+        allowed_methods=("post",),
+        captures=[
+            CaptureTarget(
+                viewport="desktop",
+                width=800,
+                height=600,
+                output_path="orders/submit/desktop.png",
+            )
+        ],
+    )
+    result = CaptureEngine(backend="auto", base_url="http://localhost:8000").execute(
+        plan, tmp_path
+    )
+
+    assert result.skipped is True
+    assert result.skipped_reason == "post-only"
+
+
+def test_safe_capture_skips_status_404(monkeypatch, tmp_path: Path):
+    class FakeResponse:
+        def status(self):
+            return 404
+
+    class FakeBodyLocator:
+        def inner_text(self):
+            return "Not Found"
+
+        def count(self):
+            return 0
+
+    class FakePage:
+        url = "http://localhost:8000/orders/"
+
+        def set_default_timeout(self, *_args, **_kwargs):
+            return None
+
+        def set_viewport_size(self, *_args, **_kwargs):
+            return None
+
+        def goto(self, *_args, **_kwargs):
+            return FakeResponse()
+
+        def locator(self, selector: str):
+            if selector == "body":
+                return FakeBodyLocator()
+            return FakeBodyLocator()
+
+        def evaluate(self, *_args, **_kwargs):
+            return "text/html"
+
+        def content(self):
+            return "<html><body>Not Found</body></html>"
+
+        def screenshot(self, *_args, **_kwargs):
+            raise AssertionError("screenshot should not be called for 404")
+
+    class FakeContext:
+        def new_page(self):
+            return FakePage()
+
+        def close(self):
+            return None
+
+    class FakeBrowser:
+        def new_context(self):
+            return FakeContext()
+
+        def close(self):
+            return None
+
+    class FakePlaywrightSession:
+        class chromium:
+            @staticmethod
+            def launch():
+                return FakeBrowser()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_sync_playwright():
+        return FakePlaywrightSession()
+
+    import sys
+    import types
+
+    fake_playwright_module = types.ModuleType("playwright")
+    fake_sync_api_module = types.ModuleType("playwright.sync_api")
+    fake_sync_api_module.sync_playwright = fake_sync_playwright
+    fake_playwright_module.sync_api = fake_sync_api_module
+    monkeypatch.setitem(sys.modules, "playwright", fake_playwright_module)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake_sync_api_module)
+
+    result = CaptureEngine(
+        backend="playwright",
+        base_url="http://localhost:8000",
+        skipped_dir=tmp_path / "skipped",
+    ).execute(_plan(), tmp_path)
+
+    assert result.skipped is True
+    assert result.skipped_reason == "404 not found"
+    reason_file = (
+        tmp_path
+        / "skipped"
+        / "orders"
+        / "orders__pending"
+        / "skip_reason.txt"
+    )
+    assert reason_file.exists()
+    assert "404 not found" in reason_file.read_text(encoding="utf-8")
+
+
+def test_should_skip_auto_login_for_login_and_register_paths():
+    engine = CaptureEngine(backend="auto", base_url="http://localhost:8000")
+
+    login_plan = CapturePlan(
+        module="auth",
+        scenario="auth.login.default",
+        route="login",
+        route_path="/auth/login/",
+        actor=None,
+        seed_provider="existing",
+        estimated_objects=0,
+        captures=[],
+        route_source="frontend",
+    )
+    register_plan = CapturePlan(
+        module="auth",
+        scenario="auth.register.default",
+        route="register",
+        route_path="/register/",
+        actor=None,
+        seed_provider="existing",
+        estimated_objects=0,
+        captures=[],
+        route_source="backend",
+    )
+    orders_plan = CapturePlan(
+        module="orders",
+        scenario="orders.list.default",
+        route="orders",
+        route_path="/orders/",
+        actor=None,
+        seed_provider="existing",
+        estimated_objects=0,
+        captures=[],
+    )
+
+    assert engine._should_skip_auto_login("http://localhost:5173/auth/login/", login_plan) is True
+    assert engine._should_skip_auto_login("http://localhost:5173/register/", register_plan) is True
+    assert engine._should_skip_auto_login("http://localhost:5173/orders/", orders_plan) is False
+
+
+def test_duplicate_url_is_skipped_on_second_plan(tmp_path: Path):
+    engine = CaptureEngine(backend="placeholder", base_url="http://localhost:8000")
+    first_plan = CapturePlan(
+        module="orders",
+        scenario="orders.default",
+        route="orders",
+        route_path="/orders/",
+        actor=None,
+        seed_provider="existing",
+        estimated_objects=0,
+        captures=[
+            CaptureTarget(
+                viewport="desktop",
+                width=800,
+                height=600,
+                output_path="orders/default/desktop.png",
+            )
+        ],
+    )
+    second_plan = CapturePlan(
+        module="orders",
+        scenario="orders.high_volume",
+        route="orders",
+        route_path="/orders/",
+        actor=None,
+        seed_provider="deterministic",
+        estimated_objects=25,
+        captures=[
+            CaptureTarget(
+                viewport="desktop",
+                width=800,
+                height=600,
+                output_path="orders/high_volume/desktop.png",
+            )
+        ],
+    )
+
+    first = engine.execute(first_plan, tmp_path)
+    second = engine.execute(second_plan, tmp_path)
+
+    assert first.skipped is False
+    assert second.skipped is True
+    assert second.skipped_reason == "duplicate url"

@@ -1,6 +1,6 @@
 from django_showcase.capture.compiler import CapturePlanCompiler
 from django_showcase.discovery.models import FieldMetadata, ModelMetadata
-from django_showcase.discovery.urls import RouteInfo
+from django_showcase.discovery.urls import RouteInfo, normalize_route_pattern
 from django_showcase.discovery.views import ViewMetadata
 from django_showcase.discovery.models import inspect_models
 from django_showcase.discovery.urls import discover_routes
@@ -65,3 +65,44 @@ def test_planner_handles_numeric_choices():
 
     assert "orders.orders.1" in graph.scenarios
     assert graph.scenarios["orders.orders.1"].title == "1"
+
+
+def test_normalize_route_pattern_removes_regex_literals():
+    pattern = r"^memories/current\.(?P<format>[a-z0-9]+)/?$"
+    assert normalize_route_pattern(pattern) == "/memories/current.json/"
+    assert normalize_route_pattern("/orders/") == "/orders/"
+
+
+def test_normalize_route_pattern_replaces_django_converters_with_samples():
+    pattern = "admin/avatar/avatar/<path:object_id>/change/"
+    assert normalize_route_pattern(pattern) == "/admin/avatar/avatar/1/change/"
+
+
+def test_normalize_route_pattern_uses_one_for_int_identifiers():
+    assert normalize_route_pattern("/orders/<int:id>/") == "/orders/1/"
+
+
+def test_planner_propagates_route_method_metadata():
+    planner = ScenarioPlanner()
+    graph = planner.build_graph(
+        PlannerInputs(
+            routes=[
+                RouteInfo(
+                    name="orders_submit",
+                    pattern="/orders/submit/",
+                    module_id="orders",
+                    view_name="OrdersSubmitView",
+                    is_get_supported=False,
+                    allowed_methods=("post",),
+                )
+            ],
+            views=[ViewMetadata(route_name="orders_submit", view_name="OrdersSubmitView")],
+            models=[],
+            max_scenarios_per_module=4,
+            max_choices_per_field=2,
+        )
+    )
+
+    scenario = graph.scenarios["orders.orders_submit.default"]
+    assert scenario.params["is_get_supported"] is False
+    assert scenario.params["allowed_methods"] == ["post"]
