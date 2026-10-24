@@ -70,9 +70,13 @@ SHOWCASE = {
   "FRONTEND_DIR": "frontend/",
   "FRONTEND_DIRS": ["backend_ui/", "frontend_ui/"],  # optional parallel roots
   "CAPTURE_BACKEND": "auto",  # auto | playwright | placeholder
+  "CAPTURE_WORKERS": 1,  # >1 enables backend parallel capture in non-scenario mode (frontend remains sequential)
   "CAPTURE_BASE_URL": "http://127.0.0.1:8000",  # required for real browser captures
   "FRONTEND_BASE_URL": "http://127.0.0.1:5173",  # optional frontend runtime URL for SPA captures
   "CAPTURE_TIMEOUT_SECONDS": 20.0,
+  "CAPTURE_USE_TEMP_USER": True,  # True: create temp superuser and auto-delete after run
+  "CAPTURE_ADMIN_USERNAME": "showcaseuser",  # temp user credentials or existing login
+  "CAPTURE_ADMIN_PASSWORD": "showcaseuser",  # temp user credentials or existing login
   "AGENT_PROVIDER": "openai",
   "AGENT_MODEL": "gpt-4.1-mini",
   "AGENT_TIMEOUT_SECONDS": 30.0,
@@ -108,8 +112,8 @@ Default output:
 │   ├── index.html
 │   └── scenarios/
 ├── skipped/
-│   ├── backend/<module>/<scenario>/skip_reason.txt
-│   └── frontend/<module>/<scenario>/skip_reason.txt
+│   ├── backend/<module>/<candidate>.txt
+│   └── frontend/<module>/<candidate>.txt
 └── screenshots/
   ├── desktop/  # present when both --desktop and --mobile are selected
   │ ├── backend/<module>/<candidate>.png
@@ -122,6 +126,8 @@ Default output:
 ```
 
 When running only one source (`--frontend` or `--backend`), captures and skipped records are written directly under that source root without the extra backend/frontend split folder. When running only one device (`--desktop` or `--mobile`), no top-level device split folder is created.
+
+In non-scenario mode with `CAPTURE_WORKERS > 1`, backend routes run in parallel first, then frontend routes run sequentially. This reduces transient frontend login/render timing failures while keeping backend throughput.
 
 ## Frontend compatibility
 
@@ -147,7 +153,11 @@ Every discovered route (including admin and configuration routes) gets at least 
 
 Seeding writes demo objects only inside an isolated scenario session (`--scenarios`). Each scenario runs inside a database transaction that is always rolled back, so the project database is never polluted. In default read-only mode the executor performs zero writes by construction. Required fields the plan does not specify are filled with obvious demo values (`Demo name`, `demo@example.com`), and required foreign keys are satisfied by reusing or creating minimal related demo objects.
 
+`SCENARIO_MODE` is a data-isolation mode, not a parallelism mode. Because each scenario capture is tied to a transaction-scoped seed state in this mode, capture workers are forced to 1.
+
 Capture execution is also fail-safe: with `CAPTURE_BACKEND="auto"`, real Playwright capture is attempted only when `CAPTURE_BASE_URL` is configured and Playwright is available; otherwise the engine degrades to placeholder images and records warnings in `manifest.json` and the report.
+
+For authenticated captures, the engine prepares the login account once at startup (instead of before every scenario). Set `CAPTURE_USE_TEMP_USER=False` to use an existing account (with `CAPTURE_ADMIN_USERNAME` / `CAPTURE_ADMIN_PASSWORD`) and skip automatic create/delete.
 
 At the end of every full run, the tool builds `.showcase/showcase.zip` (or your `ARCHIVE_FILENAME`) containing manifest, report, screenshots, and metadata for one-click demo handoff.
 

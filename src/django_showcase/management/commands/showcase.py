@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from dataclasses import replace
 from time import perf_counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management.base import BaseCommand
@@ -263,12 +264,23 @@ class Command(BaseCommand):
                 if module_id not in skip_filters
             }
 
+        scenario_mode = options["scenarios"] or config.scenario_mode
+
         plans = CapturePlanCompiler().compile(
             graph,
             include_desktop=include_desktop,
             include_mobile=include_mobile,
             split_devices=split_device_dirs,
         )
+        if not scenario_mode:
+            planned_count = len(plans)
+            plans = _collapse_plans_for_non_scenario_mode(plans)
+            if len(plans) < planned_count:
+                self.stdout.write(
+                    self.style.WARNING(
+                        "SCENARIO_MODE disabled: collapsing duplicate scenario captures per URL."
+                    )
+                )
         if split_route_source_dirs:
             plans = [
                 replace(
@@ -333,25 +345,261 @@ class Command(BaseCommand):
             timeout_seconds=config.capture_timeout_seconds,
             capture_username=config.capture_admin_username,
             capture_password=config.capture_admin_password,
-            cleanup_temp_user=config.capture_cleanup_temp_user,
+            use_temp_user=config.capture_use_temp_user,
             skipped_dir=config.output_dir / "skipped",
             split_sources=split_route_source_dirs,
             event_logger=capture_log,
         )
-        scenario_mode = options["scenarios"] or config.scenario_mode
+        capture_workers = max(1, int(config.capture_workers))
+        if scenario_mode and capture_workers > 1:
+            warnings.warn(
+                "SCENARIO_MODE uses transaction-scoped seeding; forcing CAPTURE_WORKERS=1."
+            )
+            capture_workers = 1
+        if scenario_mode:
+            self.stdout.write(
+                self.style.WARNING(
+                    "SCENARIO_MODE enabled: each scenario runs in an isolated transaction and rolls back after capture."
+                )
+            )
 
         created: list[str] = []
         seeded = 0
         capture_backends: set[str] = set()
         successful_plans: list[CapturePlan] = []
+        login_failed_pages = 0
+        fallback_pages = 0
+        login_failed_details: list[dict[str, str]] = []
+        fallback_details: list[dict[str, str]] = []
+        issue_skipped_pages = 0
+        issue_skipped_details: list[dict[str, str]] = []
+        issue_skipped_by_reason: dict[str, int] = {}
         seed_strategy = options["seed_strategy"] or config.agentic_seed_strategy
         try:
             with scenario_runtime(enabled=scenario_mode) as session:
                 executor = SeedExecutor(session)
                 schema_summary = build_schema_summary() if agentic else {}
-                for plan in plans:
-                    scenario = graph.scenarios[plan.scenario]
-                    with scenario_transaction(session):
+
+                if not capture_engine.prepare_auth_user():
+                    warnings.warn(
+                        "Capture login user is not ready; captures may fail on authenticated routes."
+                    )
+
+                def run_capture(plan: CapturePlan):
+                    result = capture_engine.execute(plan, config.screenshots_dir)
+                    return plan, result
+
+                def collect_capture_result(
+                    plan: CapturePlan,
+                    capture_result,
+                    allow_defer: bool = True,
+                ) -> None:
+                    nonlocal login_failed_pages, fallback_pages, issue_skipped_pages
+                    capture_backends.add(capture_result.backend_used)
+                    warnings.messages.extend(capture_result.warnings)
+                    if allow_defer and getattr(capture_result, "retryable", False):
+                        return
+                    if capture_result.login_failed and not getattr(
+                        capture_result, "retryable", False
+                    ):
+                        login_failed_pages += 1
+                        login_failed_details.append(
+                            {
+                                "scenario": plan.scenario,
+                                "route": plan.route,
+                                "reason": capture_result.login_failed_reason
+                                or "login failed",
+                            }
+                        )
+                    if capture_result.fallback_used and not getattr(
+                        capture_result, "retryable", False
+                    ):
+                        fallback_pages += 1
+                        fallback_details.append(
+                            {
+                                "scenario": plan.scenario,
+                                "route": plan.route,
+                                "reason": capture_result.fallback_reason
+                                or "fallback used",
+                            }
+                        )
+                    if capture_result.skipped and not getattr(
+                        capture_result, "retryable", False
+                    ):
+                        skip_reason = capture_result.skipped_reason or "non-renderable route"
+                        if skip_reason not in {"api endpoint", "post-only", "mutation route"}:
+                            issue_skipped_pages += 1
+                            issue_skipped_details.append(
+                                {
+                                    "scenario": plan.scenario,
+                                    "route": plan.route,
+                                    "reason": skip_reason,
+                                }
+                            )
+                            issue_skipped_by_reason[skip_reason] = (
+                                issue_skipped_by_reason.get(skip_reason, 0) + 1
+                            )
+                        warnings.warn(
+                            f"Skipped scenario {plan.scenario} ({plan.route}): {skip_reason}"
+                        )
+                        return
+                    successful_plans.append(plan)
+                    created.extend(capture_result.created_paths)
+
+                def execute_with_deferred_retries(
+                    plan_list: list[CapturePlan],
+                    workers: int,
+                ) -> None:
+                    retry_queue: list[CapturePlan] = []
+
+                    def is_retryable(result) -> bool:
+                        return bool(getattr(result, "retryable", False))
+
+                    def retry_reason(result) -> str:
+                        return str(
+                            getattr(result, "failure_reason", None)
+                            or getattr(result, "skipped_reason", None)
+                            or "retryable failure"
+                        )
+
+                    if workers <= 1:
+                        for plan in plan_list:
+                            capture_result = capture_engine.execute(
+                                plan, config.screenshots_dir
+                            )
+                            if is_retryable(capture_result):
+                                retry_queue.append(plan)
+                                capture_log(
+                                    f"retry queued scenario={plan.scenario} reason={retry_reason(capture_result)}"
+                                )
+                            collect_capture_result(plan, capture_result)
+                    else:
+                        with ThreadPoolExecutor(max_workers=workers) as pool:
+                            futures = [pool.submit(run_capture, plan) for plan in plan_list]
+                            capture_log(
+                                f"parallel capture submitted tasks={len(futures)} workers={workers}"
+                            )
+                            completed = 0
+                            for future in as_completed(futures):
+                                plan, capture_result = future.result()
+                                completed += 1
+                                capture_log(
+                                    f"parallel capture progress completed={completed}/{len(futures)} scenario={plan.scenario}"
+                                )
+                                if is_retryable(capture_result):
+                                    retry_queue.append(plan)
+                                    capture_log(
+                                        f"retry queued scenario={plan.scenario} reason={retry_reason(capture_result)}"
+                                    )
+                                collect_capture_result(plan, capture_result)
+
+                    if workers > 1 and retry_queue:
+                        capture_log(
+                            f"deferred retry start count={len(retry_queue)} mode=sequential"
+                        )
+                        for plan in retry_queue:
+                            capture_log(
+                                f"deferred retry attempt scenario={plan.scenario}"
+                            )
+                            capture_engine.cleanup_capture_artifacts(
+                                plan, config.screenshots_dir
+                            )
+                            retry_result = capture_engine.execute(
+                                plan, config.screenshots_dir
+                            )
+                            collect_capture_result(plan, retry_result, allow_defer=False)
+
+                if scenario_mode:
+                    capture_log(
+                        f"capture mode=scenario workers=1 plans={len(plans)}"
+                    )
+                    for plan in plans:
+                        scenario = graph.scenarios[plan.scenario]
+                        capture_log(
+                            "scenario txn start "
+                            f"scenario={plan.scenario} route={plan.route}"
+                        )
+                        with scenario_transaction(session):
+                            seeded_before = seeded
+                            if agentic and (seed_strategy == "all_pages" or scenario.goal):
+                                goal = scenario.goal or (
+                                    "Show a realistic demo state for route "
+                                    f"{scenario.route}."
+                                )
+                                seed_plan = safe_plan_seed(
+                                    agentic,
+                                    SeedPlanningRequest(
+                                        scenario_id=scenario.id,
+                                        goal=goal,
+                                        schema_summary=schema_summary,
+                                    ),
+                                    fallback=scenario.seed.compile() if scenario.seed else None,
+                                    warnings=warnings,
+                                )
+                                if seed_plan is not None:
+                                    seeded += executor.execute(seed_plan).objects_created
+                                    capture_log(
+                                        "scenario seed executed "
+                                        f"scenario={plan.scenario} mode=agentic created={seeded - seeded_before}"
+                                    )
+                                else:
+                                    capture_log(
+                                        "scenario seed skipped "
+                                        f"scenario={plan.scenario} mode=agentic reason=no-plan"
+                                    )
+                            elif scenario.seed:
+                                seed_plan = validator.validate(scenario.seed.compile())
+                                seeded += executor.execute(seed_plan).objects_created
+                                capture_log(
+                                    "scenario seed executed "
+                                    f"scenario={plan.scenario} mode=deterministic created={seeded - seeded_before}"
+                                )
+                            else:
+                                capture_log(
+                                    "scenario seed skipped "
+                                    f"scenario={plan.scenario} reason=no-seed"
+                                )
+
+                            capture_result = capture_engine.execute(
+                                plan, config.screenshots_dir
+                            )
+                            capture_log(
+                                "scenario capture result "
+                                f"scenario={plan.scenario} backend={capture_result.backend_used} "
+                                f"skipped={capture_result.skipped} created={len(capture_result.created_paths)}"
+                            )
+                            collect_capture_result(plan, capture_result)
+                        capture_log(
+                            "scenario txn end "
+                            f"scenario={plan.scenario} rollback=applied"
+                        )
+                else:
+                    capture_log(
+                        "SCENARIO_MODE disabled: seed execution is computed but database writes are skipped."
+                    )
+                    backend_plans = [
+                        plan for plan in plans if plan.route_source == "backend"
+                    ]
+                    frontend_plans = [
+                        plan for plan in plans if plan.route_source == "frontend"
+                    ]
+
+                    if backend_plans:
+                        if capture_workers > 1:
+                            capture_log(
+                                f"capture mode=parallel route_source=backend workers={capture_workers} plans={len(backend_plans)}"
+                            )
+                        else:
+                            capture_log(
+                                f"capture mode=sequential route_source=backend workers=1 plans={len(backend_plans)}"
+                            )
+                    if frontend_plans:
+                        capture_log(
+                            f"capture mode=sequential route_source=frontend workers=1 plans={len(frontend_plans)}"
+                        )
+
+                    for plan in plans:
+                        scenario = graph.scenarios[plan.scenario]
                         if agentic and (seed_strategy == "all_pages" or scenario.goal):
                             goal = scenario.goal or (
                                 "Show a realistic demo state for route "
@@ -372,19 +620,11 @@ class Command(BaseCommand):
                         elif scenario.seed:
                             seed_plan = validator.validate(scenario.seed.compile())
                             seeded += executor.execute(seed_plan).objects_created
-                        capture_result = capture_engine.execute(
-                            plan, config.screenshots_dir
-                        )
-                        capture_backends.add(capture_result.backend_used)
-                        warnings.messages.extend(capture_result.warnings)
-                        if capture_result.skipped:
-                            skip_reason = capture_result.skipped_reason or "non-renderable route"
-                            warnings.warn(
-                                f"Skipped scenario {plan.scenario} ({plan.route}): {skip_reason}"
-                            )
-                            continue
-                        successful_plans.append(plan)
-                        created.extend(capture_result.created_paths)
+
+                    if backend_plans:
+                        execute_with_deferred_retries(backend_plans, capture_workers)
+                    if frontend_plans:
+                        execute_with_deferred_retries(frontend_plans, 1)
         finally:
             capture_engine.cleanup_temp_user()
 
@@ -400,6 +640,13 @@ class Command(BaseCommand):
         manifest["capture"]["backend"] = (
             "+".join(sorted(capture_backends)) if capture_backends else "none"
         )
+        manifest["capture"]["login_failed_pages"] = login_failed_pages
+        manifest["capture"]["fallback_pages"] = fallback_pages
+        manifest["capture"]["issue_skipped_pages"] = issue_skipped_pages
+        manifest["capture"]["issue_skipped_by_reason"] = issue_skipped_by_reason
+        manifest["capture"]["login_failed_details"] = login_failed_details
+        manifest["capture"]["fallback_details"] = fallback_details
+        manifest["capture"]["issue_skipped_details"] = issue_skipped_details
         (config.output_dir / "manifest.json").write_text(
             json.dumps(manifest, indent=2), encoding="utf-8"
         )
@@ -428,6 +675,14 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             self.style.SUCCESS(f"Created {len(created)} capture artifacts")
+        )
+        self.stdout.write(
+            self.style.WARNING(
+                "Capture quality: "
+                "login_failed_pages="
+                f"{login_failed_pages}, fallback_pages={fallback_pages}, "
+                f"issue_skipped_pages={issue_skipped_pages}"
+            )
         )
         self.stdout.write(self.style.SUCCESS(f"Report written to {report_path}"))
         if options.get("pdf"):
@@ -491,3 +746,29 @@ def _with_route_source_prefix(
         if prefix in {"mobile", "desktop"} and tail:
             return f"{prefix}/{route_source}/{tail}"
     return f"{route_source}/{output_path}"
+
+
+def _collapse_plans_for_non_scenario_mode(plans: list[CapturePlan]) -> list[CapturePlan]:
+    selected: dict[tuple[str, str], CapturePlan] = {}
+    for plan in plans:
+        key = (plan.route_source.lower(), (plan.route_path or plan.route).lower())
+        current = selected.get(key)
+        if current is None or _plan_rank(plan) < _plan_rank(current):
+            selected[key] = plan
+    return sorted(
+        selected.values(),
+        key=lambda item: (
+            item.module,
+            item.route_source,
+            item.route_path or item.route,
+            item.scenario,
+        ),
+    )
+
+
+def _plan_rank(plan: CapturePlan) -> tuple[int, str]:
+    if plan.scenario.endswith(".default"):
+        return (0, plan.scenario)
+    if plan.scenario.endswith(".empty"):
+        return (1, plan.scenario)
+    return (2, plan.scenario)

@@ -27,9 +27,10 @@ class ShowcaseConfig:
     capture_base_url: str | None = None
     frontend_base_url: str | None = None
     capture_timeout_seconds: float = 20.0
+    capture_workers: int = 1
     capture_admin_username: str = "showcaseuser"
     capture_admin_password: str = "showcaseuser"
-    capture_cleanup_temp_user: bool = True
+    capture_use_temp_user: bool = True
     agentic_seed_strategy: Literal["goal_only", "all_pages"] = "all_pages"
     archive_filename: str = "showcase.zip"
     prompt_overrides: dict[str, str] | None = None
@@ -65,9 +66,10 @@ class ShowcaseConfig:
             capture_base_url=raw.get("CAPTURE_BASE_URL"),
             frontend_base_url=raw.get("FRONTEND_BASE_URL"),
             capture_timeout_seconds=raw.get("CAPTURE_TIMEOUT_SECONDS", 20.0),
+            capture_workers=max(1, int(raw.get("CAPTURE_WORKERS", 1))),
             capture_admin_username=raw.get("CAPTURE_ADMIN_USERNAME", "showcaseuser"),
             capture_admin_password=raw.get("CAPTURE_ADMIN_PASSWORD", "showcaseuser"),
-            capture_cleanup_temp_user=raw.get("CAPTURE_CLEANUP_TEMP_USER", True),
+            capture_use_temp_user=raw.get("CAPTURE_USE_TEMP_USER", True),
             agentic_seed_strategy=raw.get("AGENTIC_SEED_STRATEGY", "all_pages"),
             archive_filename=raw.get("ARCHIVE_FILENAME", "showcase.zip"),
             prompt_overrides=prompt_overrides,

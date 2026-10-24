@@ -103,7 +103,6 @@ def test_cleanup_temp_user_deletes_demo_user(monkeypatch):
         base_url="http://localhost:8000",
         capture_username="showcaseuser",
         capture_password="showcaseuser",
-        cleanup_temp_user=True,
     )
 
     class FakeUser:
@@ -148,7 +147,6 @@ def test_ensure_django_superuser_creates_user_with_password(monkeypatch):
         base_url="http://localhost:8000",
         capture_username="showcaseuser",
         capture_password="showcasepass",
-        cleanup_temp_user=True,
     )
     created: dict[str, str] = {}
 
@@ -446,8 +444,8 @@ def test_safe_capture_skips_status_404(monkeypatch, tmp_path: Path):
         tmp_path
         / "skipped"
         / "orders"
-        / "orders__pending"
-        / "skip_reason.txt"
+        / "pending"
+        / "desktop.txt"
     )
     assert reason_file.exists()
     assert "404 not found" in reason_file.read_text(encoding="utf-8")
@@ -494,46 +492,129 @@ def test_should_skip_auto_login_for_login_and_register_paths():
     assert engine._should_skip_auto_login("http://localhost:5173/orders/", orders_plan) is False
 
 
-def test_duplicate_url_is_skipped_on_second_plan(tmp_path: Path):
-    engine = CaptureEngine(backend="placeholder", base_url="http://localhost:8000")
-    first_plan = CapturePlan(
-        module="orders",
-        scenario="orders.default",
-        route="orders",
-        route_path="/orders/",
-        actor=None,
-        seed_provider="existing",
-        estimated_objects=0,
-        captures=[
-            CaptureTarget(
-                viewport="desktop",
-                width=800,
-                height=600,
-                output_path="orders/default/desktop.png",
-            )
-        ],
+def test_prepare_auth_user_runs_once(monkeypatch):
+    engine = CaptureEngine(
+        backend="placeholder",
+        capture_username="showcaseuser",
+        capture_password="showcaseuser",
     )
-    second_plan = CapturePlan(
-        module="orders",
-        scenario="orders.high_volume",
-        route="orders",
-        route_path="/orders/",
-        actor=None,
-        seed_provider="deterministic",
-        estimated_objects=25,
-        captures=[
-            CaptureTarget(
-                viewport="desktop",
-                width=800,
-                height=600,
-                output_path="orders/high_volume/desktop.png",
-            )
-        ],
+    calls = {"count": 0}
+
+    def fake_ensure():
+        calls["count"] += 1
+        return True
+
+    engine._ensure_django_superuser = fake_ensure
+
+    assert engine.prepare_auth_user() is True
+    assert engine.prepare_auth_user() is True
+    assert calls["count"] == 1
+
+
+def test_cleanup_temp_user_skipped_in_existing_user_mode(monkeypatch):
+    engine = CaptureEngine(
+        backend="auto",
+        base_url="http://localhost:8000",
+        capture_username="admin",
+        capture_password="adminpass",
+        use_temp_user=False,
     )
 
-    first = engine.execute(first_plan, tmp_path)
-    second = engine.execute(second_plan, tmp_path)
+    class FakeUser:
+        def __init__(self):
+            self.deleted = False
 
-    assert first.skipped is False
-    assert second.skipped is True
-    assert second.skipped_reason == "duplicate url"
+        def delete(self):
+            self.deleted = True
+
+    fake_user = FakeUser()
+
+    class FakeManager:
+        @staticmethod
+        def filter(**_kwargs):
+            return type("Result", (), {"first": lambda *_args, **_kwargs: fake_user})()
+
+    class FakeUserModel:
+        objects = FakeManager()
+
+    import sys
+    import types
+
+    fake_django = types.ModuleType("django")
+    fake_contrib = types.ModuleType("django.contrib")
+    fake_contrib.__path__ = []
+    auth_module = types.ModuleType("django.contrib.auth")
+    auth_module.get_user_model = lambda: FakeUserModel
+    fake_django.contrib = fake_contrib
+    fake_contrib.auth = auth_module
+
+    monkeypatch.setitem(sys.modules, "django", fake_django)
+    monkeypatch.setitem(sys.modules, "django.contrib", fake_contrib)
+    monkeypatch.setitem(sys.modules, "django.contrib.auth", auth_module)
+
+    engine.cleanup_temp_user()
+    assert fake_user.deleted is False
+
+
+def test_login_retry_eventually_succeeds(monkeypatch):
+    engine = CaptureEngine(backend="auto", base_url="http://localhost:8000")
+    calls = {"count": 0}
+
+    monkeypatch.setattr(
+        "django_showcase.capture.capture.sleep",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def fake_login_if_needed(_page, _route_source="backend"):
+        calls["count"] += 1
+        return True
+
+    def fake_diagnose(_page):
+        return "failed (transient)" if calls["count"] == 1 else "success"
+
+    class FakePage:
+        def goto(self, *_args, **_kwargs):
+            return None
+
+    engine._login_if_needed = fake_login_if_needed
+    engine._diagnose_login_result = fake_diagnose
+
+    attempted, success, attempts, status = engine._login_with_retry(
+        FakePage(),
+        route_source="backend",
+        target_url="http://localhost:8000/orders/",
+        scenario_id="orders.orders.default",
+    )
+
+    assert attempted is True
+    assert success is True
+    assert attempts == 2
+    assert status == "success"
+
+
+def test_login_retry_marks_failure_after_retries(monkeypatch):
+    engine = CaptureEngine(backend="auto", base_url="http://localhost:8000")
+
+    monkeypatch.setattr(
+        "django_showcase.capture.capture.sleep",
+        lambda *_args, **_kwargs: None,
+    )
+
+    class FakePage:
+        def goto(self, *_args, **_kwargs):
+            return None
+
+    engine._login_if_needed = lambda *_args, **_kwargs: True
+    engine._diagnose_login_result = lambda *_args, **_kwargs: "failed (bad creds)"
+
+    attempted, success, attempts, status = engine._login_with_retry(
+        FakePage(),
+        route_source="backend",
+        target_url="http://localhost:8000/orders/",
+        scenario_id="orders.orders.default",
+    )
+
+    assert attempted is True
+    assert success is False
+    assert attempts == 2
+    assert status == "failed (bad creds)"

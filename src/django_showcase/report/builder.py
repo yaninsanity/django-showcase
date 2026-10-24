@@ -25,6 +25,12 @@ _SUMMARY = """<section class="module">
     <p><strong>Framework:</strong> {framework}</p>
     <p><strong>Strategy Profile:</strong> {profile}</p>
     <p><strong>Capture Backend:</strong> {capture_backend}</p>
+    <p><strong>Login Failed Pages:</strong> {login_failed_pages}</p>
+    <div><strong>Login Failed Details:</strong>{login_failed_details}</div>
+    <p><strong>Fallback Pages:</strong> {fallback_pages}</p>
+    <div><strong>Fallback Details:</strong>{fallback_details}</div>
+    <p><strong>Issue Skipped Pages:</strong> {issue_skipped_pages}</p>
+    <div><strong>Issue Skipped Details:</strong>{issue_skipped_grouped_details}</div>
     <p><strong>SPA Routes:</strong> {routes}</p>
     <p><strong>Router Files:</strong> {router_files}</p>
     <p><strong>Discovered Components:</strong> {components}</p>
@@ -77,6 +83,26 @@ class ReportBuilder:
             profile=frontend.get("profile", frontend.get("framework", "django-mvt")),
             capture_backend=((manifest or {}).get("capture") or {}).get(
                 "backend", "unknown"
+            ),
+            login_failed_pages=((manifest or {}).get("capture") or {}).get(
+                "login_failed_pages", 0
+            ),
+            login_failed_details=_format_capture_issue_details(
+                ((manifest or {}).get("capture") or {}).get("login_failed_details", [])
+            ),
+            fallback_pages=((manifest or {}).get("capture") or {}).get(
+                "fallback_pages", 0
+            ),
+            fallback_details=_format_capture_issue_details(
+                ((manifest or {}).get("capture") or {}).get("fallback_details", [])
+            ),
+            issue_skipped_pages=((manifest or {}).get("capture") or {}).get(
+                "issue_skipped_pages", 0
+            ),
+            issue_skipped_grouped_details=_format_issue_skip_grouped_details(
+                ((manifest or {}).get("capture") or {}).get(
+                    "issue_skipped_details", []
+                )
             ),
             routes=frontend.get("routes", 0),
             router_files=len(frontend.get("router_files", [])),
@@ -136,3 +162,37 @@ class ReportBuilder:
                 first.close()
             for image in rest:
                 image.close()
+
+
+def _format_capture_issue_details(items: list[object]) -> str:
+    rows: list[str] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        scenario = str(entry.get("scenario", "unknown"))
+        route = str(entry.get("route", "unknown"))
+        reason = str(entry.get("reason", "unknown"))
+        rows.append(f"<li>{scenario} ({route}): {reason}</li>")
+    return f"<ul>{''.join(rows)}</ul>" if rows else "<p>none</p>"
+
+
+def _format_issue_skip_grouped_details(items: list[object]) -> str:
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        reason = str(entry.get("reason", "unknown"))
+        scenario = str(entry.get("scenario", "unknown"))
+        route = str(entry.get("route", "unknown"))
+        grouped[reason].append(f"{scenario} ({route})")
+
+    if not grouped:
+        return "<p>none</p>"
+
+    sections: list[str] = []
+    for reason, routes in sorted(grouped.items()):
+        route_items = "".join(f"<li>{route}</li>" for route in routes)
+        sections.append(
+            f"<p><strong>{reason}:</strong> {len(routes)}</p><ul>{route_items}</ul>"
+        )
+    return "".join(sections)

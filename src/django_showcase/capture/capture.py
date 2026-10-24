@@ -6,6 +6,8 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
+from time import sleep
 from typing import Callable
 from typing import Literal
 
@@ -24,6 +26,12 @@ class CaptureResult:
     warnings: list[str] = field(default_factory=list)
     skipped: bool = False
     skipped_reason: str | None = None
+    login_failed: bool = False
+    login_failed_reason: str | None = None
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+    failure_reason: str | None = None
+    retryable: bool = False
 
 
 class CaptureError(RuntimeError):
@@ -39,7 +47,9 @@ class CaptureEngine:
         timeout_seconds: float = 20.0,
         capture_username: str = "showcaseuser",
         capture_password: str = "showcaseuser",
-        cleanup_temp_user: bool = True,
+        use_temp_user: bool = True,
+        login_retry_attempts: int = 2,
+        login_retry_delay_seconds: float = 0.5,
         skipped_dir: Path | None = None,
         split_sources: bool = False,
         event_logger: Callable[[str], None] | None = None,
@@ -50,11 +60,14 @@ class CaptureEngine:
         self.timeout_seconds = timeout_seconds
         self.capture_username = capture_username
         self.capture_password = capture_password
-        self.cleanup_temp_user_enabled = cleanup_temp_user
+        self.use_temp_user = use_temp_user
+        self.login_retry_attempts = max(1, int(login_retry_attempts))
+        self.login_retry_delay_seconds = max(0.0, float(login_retry_delay_seconds))
         self.skipped_dir = skipped_dir
         self.split_sources = split_sources
-        self._seen_capture_urls: set[str] = set()
         self._temp_user_created = False
+        self._auth_prepared = False
+        self._state_lock = Lock()
         self._event_logger = event_logger
 
     def _log(self, message: str) -> None:
@@ -69,18 +82,9 @@ class CaptureEngine:
                 backend_used="skipped",
                 skipped=True,
                 skipped_reason=heuristic_reason,
+                failure_reason=heuristic_reason,
+                retryable=False,
             )
-
-        dedupe_key = self._dedupe_key(plan)
-        if dedupe_key in self._seen_capture_urls:
-            reason = "duplicate url"
-            self._record_skip(plan, output_dir, reason)
-            return CaptureResult(
-                backend_used="skipped",
-                skipped=True,
-                skipped_reason=reason,
-            )
-        self._seen_capture_urls.add(dedupe_key)
 
         if self.backend == "placeholder":
             return self._execute_placeholder(
@@ -135,6 +139,10 @@ class CaptureEngine:
                 warnings=[
                     f"capture base URL is not set for route_source={plan.route_source}; using placeholder captures."
                 ],
+                fallback_used=True,
+                fallback_reason="capture base URL is not set",
+                failure_reason="capture base URL is not set",
+                retryable=False,
             )
         if not self._ensure_playwright_runtime():
             return CaptureResult(
@@ -142,6 +150,10 @@ class CaptureEngine:
                 warnings=[
                     "Playwright runtime installation failed; using placeholder captures."
                 ],
+                fallback_used=True,
+                fallback_reason="playwright runtime installation failed",
+                failure_reason="playwright runtime installation failed",
+                retryable=False,
             )
         try:
             from playwright.sync_api import sync_playwright
@@ -151,12 +163,18 @@ class CaptureEngine:
                 warnings=[
                     f"Playwright unavailable; using placeholder captures ({exc})."
                 ],
+                fallback_used=True,
+                fallback_reason=f"playwright unavailable: {exc}",
+                failure_reason=f"playwright unavailable: {exc}",
+                retryable=False,
             )
 
         created: list[str] = []
         warnings: list[str] = []
+        login_failed = False
+        login_failed_reason: str | None = None
         target_url = self._resolve_url(plan)
-        user_ready = self._ensure_django_superuser()
+        user_ready = self._prepare_auth_user()
         if not user_ready:
             self._log(
                 f"temp user ensure failed before capture for scenario={plan.scenario}; login may fail"
@@ -180,6 +198,8 @@ class CaptureEngine:
                             warnings=warnings,
                             skipped=True,
                             skipped_reason=reason,
+                            failure_reason=reason,
+                            retryable=self._is_retryable_failure(reason),
                         )
 
                 if not self._is_renderable_page(page):
@@ -192,6 +212,8 @@ class CaptureEngine:
                         warnings=warnings,
                         skipped=True,
                         skipped_reason=reason,
+                        failure_reason=reason,
+                        retryable=self._is_retryable_failure(reason),
                     )
 
                 for target in plan.captures:
@@ -208,16 +230,21 @@ class CaptureEngine:
                             self._log(
                                 f"frontend auth probe scenario={plan.scenario} url={target_url}"
                             )
-                        logged_in = self._login_if_needed(page, plan.route_source)
-                        if logged_in:
-                            self._log(
-                                f"{plan.route_source} login submitted for scenario={plan.scenario} user={self.capture_username}"
+                        attempted, success, attempts, status = self._login_with_retry(
+                            page,
+                            route_source=plan.route_source,
+                            target_url=target_url,
+                            scenario_id=plan.scenario,
+                            max_attempts=self.login_retry_attempts,
+                            retry_delay_seconds=self.login_retry_delay_seconds,
+                        )
+                        if attempted and not success:
+                            login_failed = True
+                            login_failed_reason = status
+                            warnings.append(
+                                "Login failed for "
+                                f"scenario={plan.scenario} after {attempts} attempts ({status})."
                             )
-                            login_result = self._diagnose_login_result(page)
-                            if login_result:
-                                self._log(
-                                    f"{plan.route_source} login status for scenario={plan.scenario}: {login_result}"
-                                )
                     if page.url != target_url:
                         page.goto(target_url, wait_until="networkidle")
                     target_path = output_dir / target.output_path
@@ -242,11 +269,87 @@ class CaptureEngine:
             )
             fallback = self._execute_placeholder(plan, output_dir, reason=reason)
             fallback.warnings.extend(warnings)
+            fallback.login_failed = login_failed
+            fallback.login_failed_reason = login_failed_reason
+            fallback.fallback_used = True
+            fallback.fallback_reason = str(exc)
+            fallback.failure_reason = str(exc)
+            fallback.retryable = self._is_retryable_failure(str(exc))
             return fallback
 
         return CaptureResult(
-            created_paths=created, backend_used="playwright", warnings=warnings
+            created_paths=created,
+            backend_used="playwright",
+            warnings=warnings,
+            login_failed=login_failed,
+            login_failed_reason=login_failed_reason,
+            retryable=False,
         )
+
+    def _is_retryable_failure(self, reason: str) -> bool:
+        lower = (reason or "").lower()
+        non_retryable_markers = (
+            "api endpoint",
+            "post-only",
+            "mutation route",
+            "capture base url is not set",
+            "playwright unavailable",
+            "playwright runtime installation failed",
+            "405 method not allowed",
+            "403 forbidden",
+        )
+        if any(marker in lower for marker in non_retryable_markers):
+            return False
+        retryable_markers = (
+            "timeout",
+            "non-renderable route",
+            "http 5",
+            "500",
+            "network",
+            "connection",
+            "failed",
+            "error",
+        )
+        return any(marker in lower for marker in retryable_markers)
+
+    def _login_with_retry(
+        self,
+        page,
+        route_source: str,
+        target_url: str,
+        scenario_id: str,
+        max_attempts: int = 2,
+        retry_delay_seconds: float = 0.5,
+    ) -> tuple[bool, bool, int, str]:
+        attempted = False
+        last_status = "not-attempted"
+        attempts = 0
+        for attempt in range(1, max_attempts + 1):
+            submitted = self._login_if_needed(page, route_source)
+            if not submitted:
+                self._log(
+                    f"{route_source} login not required for scenario={scenario_id}"
+                )
+                return False, True, 0, "not-required"
+
+            attempted = True
+            attempts = attempt
+            last_status = self._diagnose_login_result(page) or "unknown"
+            self._log(
+                f"{route_source} login attempt={attempt}/{max_attempts} "
+                f"scenario={scenario_id} status={last_status}"
+            )
+            if last_status == "success":
+                return True, True, attempts, last_status
+
+            if attempt < max_attempts:
+                sleep(retry_delay_seconds)
+                page.goto(target_url, wait_until="networkidle")
+
+        self._log(
+            f"{route_source} login failed after retries scenario={scenario_id} status={last_status}"
+        )
+        return attempted, False, attempts, last_status
 
     def _ensure_playwright_runtime(self) -> bool:
         try:
@@ -347,8 +450,59 @@ class CaptureEngine:
             self._log(f"temp user ensure failed username={self.capture_username}: {exc}")
             return False
 
+    def _validate_existing_user(self) -> bool:
+        try:
+            from django.conf import settings
+            from django.contrib.auth import get_user_model
+
+            if not settings.configured:
+                self._log("existing user validation skipped: django settings not configured")
+                return False
+
+            username = self.capture_username or ""
+            if not username:
+                self._log("existing user validation failed: username is empty")
+                return False
+
+            user_model = get_user_model()
+            username_field = user_model.USERNAME_FIELD
+            user_obj = user_model.objects.filter(**{username_field: username}).first()
+            if user_obj is None:
+                self._log(f"existing user validation failed: user {username} not found")
+                return False
+            if not getattr(user_obj, "is_active", True):
+                self._log(f"existing user validation failed: user {username} is inactive")
+                return False
+            self._log(f"existing user validated username={username}")
+            return True
+        except Exception as exc:
+            self._log(f"existing user validation failed username={self.capture_username}: {exc}")
+            return False
+
+    def _prepare_auth_user(self) -> bool:
+        with self._state_lock:
+            if self._auth_prepared:
+                return True
+
+            if not self.use_temp_user:
+                ready = self._validate_existing_user()
+                if ready:
+                    self._auth_prepared = True
+                return ready
+
+            ready = self._ensure_django_superuser()
+            if ready:
+                self._auth_prepared = True
+            return ready
+
+    def prepare_auth_user(self) -> bool:
+        return self._prepare_auth_user()
+
     def cleanup_temp_user(self) -> None:
-        if not self.cleanup_temp_user_enabled:
+        if not self.use_temp_user:
+            self._log(
+                f"temp user cleanup skipped username={self.capture_username} reason=existing-user-mode"
+            )
             return
         try:
             from django.contrib.auth import get_user_model
@@ -605,31 +759,72 @@ class CaptureEngine:
         self._log(
             f"skip capture scenario={plan.scenario} route={plan.route} reason={reason}"
         )
-        base_dir = self.skipped_dir or output_dir
-        if self.split_sources:
-            base_dir = base_dir / plan.route_source
-        reason_path = (
-            base_dir / plan.module / plan.scenario.replace(".", "__") / "skip_reason.txt"
-        )
-        reason_path.parent.mkdir(parents=True, exist_ok=True)
-        reason_path.write_text(
-            "\n".join(
-                [
-                    f"Scenario: {plan.scenario}",
-                    f"Route: {plan.route}",
-                    f"Route path: {plan.route_path or '-'}",
-                    f"Resolved URL: {self._resolve_url(plan)}",
-                    f"Reason: {reason}",
-                ]
+        reason_paths = self._build_skip_reason_paths(plan, output_dir)
+        for reason_path in reason_paths:
+            reason_path.parent.mkdir(parents=True, exist_ok=True)
+            reason_path.write_text(
+                "\n".join(
+                    [
+                        f"Scenario: {plan.scenario}",
+                        f"Route: {plan.route}",
+                        f"Route path: {plan.route_path or '-'}",
+                        f"Resolved URL: {self._resolve_url(plan)}",
+                        f"Reason: {reason}",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
             )
-            + "\n",
-            encoding="utf-8",
-        )
 
-    def _dedupe_key(self, plan: CapturePlan) -> str:
-        source = (plan.route_source or "backend").lower()
-        resolved = self._resolve_url(plan).strip().lower()
-        return f"{source}::{resolved}"
+    def cleanup_capture_artifacts(self, plan: CapturePlan, output_dir: Path) -> None:
+        # Retries should replace stale fallback/skip artifacts from earlier attempts.
+        for target in plan.captures:
+            target_path = output_dir / target.output_path
+            for path in (target_path, target_path.with_suffix(".txt")):
+                try:
+                    if path.exists():
+                        path.unlink()
+                except Exception:
+                    continue
+            self._prune_empty_parent_dirs(target_path.parent, output_dir)
+
+        for reason_path in self._build_skip_reason_paths(plan, output_dir):
+            try:
+                if reason_path.exists():
+                    reason_path.unlink()
+            except Exception:
+                continue
+            base_dir = self.skipped_dir or output_dir
+            self._prune_empty_parent_dirs(reason_path.parent, base_dir)
+
+    def _build_skip_reason_paths(self, plan: CapturePlan, output_dir: Path) -> list[Path]:
+        base_dir = self.skipped_dir or output_dir
+        paths: list[Path] = []
+        for target in plan.captures:
+            output_path = Path(target.output_path)
+            if self.split_sources and output_path.parts[:1] != (plan.route_source,):
+                output_path = Path(plan.route_source) / output_path
+            paths.append((base_dir / output_path).with_suffix(".txt"))
+        return paths
+
+    def _prune_empty_parent_dirs(self, start: Path, stop: Path) -> None:
+        current = start
+        stop_resolved = stop.resolve()
+        while True:
+            try:
+                current_resolved = current.resolve()
+            except Exception:
+                break
+            if current_resolved == stop_resolved:
+                break
+            if not current.exists() or not current.is_dir():
+                current = current.parent
+                continue
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            current = current.parent
 
     def _should_skip_auto_login(self, target_url: str, plan: CapturePlan) -> bool:
         path = (plan.route_path or "").lower()
