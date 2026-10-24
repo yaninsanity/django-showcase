@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from dataclasses import replace
+from time import perf_counter
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management.base import BaseCommand
@@ -92,8 +93,36 @@ class Command(BaseCommand):
             action="store_true",
             help="Enable concise capture logs (user create/login/delete/fallback reasons).",
         )
+        parser.add_argument(
+            "--mobile",
+            action="store_true",
+            help="Capture mobile viewport screenshots.",
+        )
+        parser.add_argument(
+            "--desktop",
+            action="store_true",
+            help="Capture desktop viewport screenshots.",
+        )
+        parser.add_argument(
+            "--pdf",
+            action="store_true",
+            help="Generate an additional PDF report that includes all captured screenshots.",
+        )
+        parser.add_argument(
+            "--timing",
+            action="store_true",
+            help="Print total command duration from start to finish.",
+        )
 
     def handle(self, *args, **options) -> None:
+        timing_enabled = bool(options.get("timing"))
+        started_at = perf_counter()
+
+        def emit_total_duration() -> None:
+            if timing_enabled:
+                elapsed = perf_counter() - started_at
+                self.stdout.write(self.style.SUCCESS(f"Total duration: {elapsed:.2f}s"))
+
         verbose_capture_logs = bool(options.get("log")) or int(
             options.get("verbosity", 1)
         ) >= 2
@@ -159,6 +188,18 @@ class Command(BaseCommand):
         )
         self.stdout.write(frontend_summary)
 
+        include_mobile = bool(options.get("mobile"))
+        include_desktop = bool(options.get("desktop"))
+        if not include_mobile and not include_desktop:
+            self.stdout.write(
+                self.style.WARNING(
+                    "No device selected. Use --mobile and/or --desktop to run captures."
+                )
+            )
+            emit_total_duration()
+            return
+        split_device_dirs = include_mobile and include_desktop
+
         include_frontend, include_backend = _selected_route_sources(options)
         split_route_source_dirs = include_frontend and include_backend
 
@@ -222,7 +263,12 @@ class Command(BaseCommand):
                 if module_id not in skip_filters
             }
 
-        plans = CapturePlanCompiler().compile(graph)
+        plans = CapturePlanCompiler().compile(
+            graph,
+            include_desktop=include_desktop,
+            include_mobile=include_mobile,
+            split_devices=split_device_dirs,
+        )
         if split_route_source_dirs:
             plans = [
                 replace(
@@ -230,7 +276,11 @@ class Command(BaseCommand):
                     captures=[
                         replace(
                             target,
-                            output_path=f"{plan.route_source}/{target.output_path}",
+                            output_path=_with_route_source_prefix(
+                                target.output_path,
+                                plan.route_source,
+                                split_device_dirs,
+                            ),
                         )
                         for target in plan.captures
                     ],
@@ -272,6 +322,7 @@ class Command(BaseCommand):
         if options["plan"]:
             manifest_path = config.output_dir / "manifest.json"
             self.stdout.write(self.style.SUCCESS(f"Wrote plan to {manifest_path}"))
+            emit_total_duration()
             return
 
         validator = SeedPlanValidator(max_objects=config.max_seed_objects)
@@ -355,6 +406,15 @@ class Command(BaseCommand):
         report_path = ReportBuilder().build(
             config.report_dir, successful_plans, manifest=manifest
         )
+        pdf_path: Path | None = None
+        if options.get("pdf"):
+            try:
+                pdf_path = ReportBuilder().build_pdf(
+                    config.report_dir,
+                    [Path(path) for path in created],
+                )
+            except RuntimeError as exc:
+                warnings.warn(str(exc))
         archive_path = build_showcase_zip(
             config.output_dir, filename=config.archive_filename
         )
@@ -370,7 +430,17 @@ class Command(BaseCommand):
             self.style.SUCCESS(f"Created {len(created)} capture artifacts")
         )
         self.stdout.write(self.style.SUCCESS(f"Report written to {report_path}"))
+        if options.get("pdf"):
+            if pdf_path is not None:
+                self.stdout.write(self.style.SUCCESS(f"PDF report written to {pdf_path}"))
+            else:
+                self.stdout.write(
+                    self.style.WARNING(
+                        "PDF report was requested but no screenshots were available."
+                    )
+                )
         self.stdout.write(self.style.SUCCESS(f"Archive written to {archive_path}"))
+        emit_total_duration()
 
 
 def _normalize_option_values(values: object) -> list[str]:
@@ -411,3 +481,13 @@ def _selected_route_sources(options: dict[str, object]) -> tuple[bool, bool]:
     if backend_only and not frontend_only:
         return False, True
     return True, True
+
+
+def _with_route_source_prefix(
+    output_path: str, route_source: str, split_devices: bool
+) -> str:
+    if split_devices:
+        prefix, _, tail = output_path.partition("/")
+        if prefix in {"mobile", "desktop"} and tail:
+            return f"{prefix}/{route_source}/{tail}"
+    return f"{route_source}/{output_path}"

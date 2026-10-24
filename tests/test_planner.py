@@ -37,6 +37,22 @@ def test_planner_generates_status_and_staff_scenarios(settings):
     assert pending.estimated_objects == 3
     assert len(pending.captures) == 2
     assert pending.route_path == "/orders/"
+    outputs = {capture.output_path for capture in pending.captures}
+    assert "desktop/orders/orders__pending.png" in outputs
+    assert "mobile/orders/orders__pending.png" in outputs
+
+    admin_default_plans = [
+        plan
+        for plan in plans
+        if plan.module == "admin" and plan.scenario.endswith(".default")
+    ]
+    admin_default_outputs = {
+        capture.output_path
+        for plan in admin_default_plans
+        for capture in plan.captures
+        if capture.viewport == "desktop"
+    }
+    assert len(admin_default_outputs) == len(admin_default_plans)
 
 
 def test_planner_handles_numeric_choices():

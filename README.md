@@ -48,6 +48,11 @@ INSTALLED_APPS = [
 ```bash
 python manage.py showcase
 python manage.py showcase --plan
+python manage.py showcase --desktop
+python manage.py showcase --mobile
+python manage.py showcase --desktop --mobile
+python manage.py showcase --desktop --pdf
+python manage.py showcase --desktop --timing
 python manage.py showcase --only orders
 python manage.py showcase --skip admin
 python manage.py showcase --frontend
@@ -55,6 +60,8 @@ python manage.py showcase --backend
 python manage.py showcase --agentic
 python manage.py showcase --scenarios
 ```
+
+`--desktop` / `--mobile` are now explicit device selectors. At least one must be provided, otherwise the command prints a warning and exits to avoid accidentally generating unexpected device screenshots.
 
 Common production-safe toggles:
 
@@ -104,11 +111,17 @@ Default output:
 │   ├── backend/<module>/<scenario>/skip_reason.txt
 │   └── frontend/<module>/<scenario>/skip_reason.txt
 └── screenshots/
-  ├── backend/
-  └── frontend/
+  ├── desktop/  # present when both --desktop and --mobile are selected
+  │ ├── backend/<module>/<candidate>.png
+  │ └── frontend/<module>/<candidate>.png
+  ├── mobile/   # present when both --desktop and --mobile are selected
+  │ ├── backend/<module>/<candidate>.png
+  │ └── frontend/<module>/<candidate>.png
+  ├── backend/<module>/<candidate>.png  # single-device run
+  └── frontend/<module>/<candidate>.png # single-device run
 ```
 
-When running only one source (`--frontend` or `--backend`), captures and skipped records are written directly under that source root without the extra backend/frontend split folder.
+When running only one source (`--frontend` or `--backend`), captures and skipped records are written directly under that source root without the extra backend/frontend split folder. When running only one device (`--desktop` or `--mobile`), no top-level device split folder is created.
 
 ## Frontend compatibility
 

@@ -8,15 +8,11 @@ from django.core.management import call_command
 def test_showcase_command_writes_manifest_and_report(settings, tmp_path: Path):
     settings.SHOWCASE = {"OUTPUT_DIR": tmp_path / ".showcase"}
 
-    call_command("showcase")
+    call_command("showcase", desktop=True)
 
     assert (tmp_path / ".showcase" / "manifest.json").exists()
     assert (tmp_path / ".showcase" / "report" / "index.html").exists()
-    order_shots = list(
-        (tmp_path / ".showcase" / "screenshots" / "backend" / "orders").glob(
-            "**/desktop.png"
-        )
-    )
+    order_shots = list((tmp_path / ".showcase" / "screenshots" / "backend" / "orders").glob("*.png"))
     assert order_shots
     assert (tmp_path / ".showcase" / "showcase.zip").exists()
 
@@ -37,7 +33,7 @@ def test_showcase_manifest_includes_frontend_summary(settings, tmp_path: Path):
         "FRONTEND_DIR": frontend_dir,
     }
 
-    call_command("showcase")
+    call_command("showcase", desktop=True)
 
     manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
     assert manifest["frontend"]["framework"] == "react"
@@ -80,7 +76,7 @@ def test_showcase_supports_parallel_frontend_dirs(settings, tmp_path: Path):
         "FRONTEND_DIRS": [str(frontend_ui)],
     }
 
-    call_command("showcase")
+    call_command("showcase", desktop=True)
 
     manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
     assert manifest["frontend"]["routes"] == 2
@@ -90,7 +86,7 @@ def test_showcase_log_flag_prints_capture_events(settings, tmp_path: Path):
     settings.SHOWCASE = {"OUTPUT_DIR": tmp_path / ".showcase"}
     stdout = StringIO()
 
-    call_command("showcase", log=True, stdout=stdout)
+    call_command("showcase", desktop=True, log=True, stdout=stdout)
 
     output = stdout.getvalue()
     assert "[capture]" in output
@@ -100,7 +96,7 @@ def test_showcase_log_flag_prints_capture_events(settings, tmp_path: Path):
 def test_showcase_skip_excludes_admin_module(settings, tmp_path: Path):
     settings.SHOWCASE = {"OUTPUT_DIR": tmp_path / ".showcase"}
 
-    call_command("showcase", plan=True, skip=["admin"])
+    call_command("showcase", plan=True, desktop=True, skip=["admin"])
 
     manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
     assert all(module["module"] != "admin" for module in manifest["modules"])
@@ -110,7 +106,13 @@ def test_showcase_skip_excludes_admin_module(settings, tmp_path: Path):
 def test_showcase_only_and_skip_can_be_combined(settings, tmp_path: Path):
     settings.SHOWCASE = {"OUTPUT_DIR": tmp_path / ".showcase"}
 
-    call_command("showcase", plan=True, only=["orders", "admin"], skip=["admin"])
+    call_command(
+        "showcase",
+        plan=True,
+        desktop=True,
+        only=["orders", "admin"],
+        skip=["admin"],
+    )
 
     manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
     modules = {module["module"] for module in manifest["modules"]}
@@ -131,7 +133,7 @@ def test_showcase_frontend_only_filters_backend_routes(settings, tmp_path: Path)
         "FRONTEND_DIR": frontend_dir,
     }
 
-    call_command("showcase", plan=True, frontend=True)
+    call_command("showcase", plan=True, desktop=True, frontend=True)
 
     manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
     assert manifest["scenarios"]
@@ -151,7 +153,7 @@ def test_showcase_backend_only_filters_frontend_routes(settings, tmp_path: Path)
         "FRONTEND_DIR": frontend_dir,
     }
 
-    call_command("showcase", plan=True, backend=True)
+    call_command("showcase", plan=True, desktop=True, backend=True)
 
     manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
     assert all(scenario["module"] != "billing" for scenario in manifest["scenarios"])
@@ -170,7 +172,48 @@ def test_showcase_screenshots_split_by_source_when_mixed(settings, tmp_path: Pat
         "FRONTEND_DIR": frontend_dir,
     }
 
-    call_command("showcase")
+    call_command("showcase", desktop=True, mobile=True)
 
-    assert (tmp_path / ".showcase" / "screenshots" / "backend").exists()
-    assert (tmp_path / ".showcase" / "screenshots" / "frontend").exists()
+    assert (tmp_path / ".showcase" / "screenshots" / "desktop" / "backend").exists()
+    assert (tmp_path / ".showcase" / "screenshots" / "desktop" / "frontend").exists()
+    assert (tmp_path / ".showcase" / "screenshots" / "mobile" / "backend").exists()
+    assert (tmp_path / ".showcase" / "screenshots" / "mobile" / "frontend").exists()
+
+
+def test_showcase_requires_explicit_device_selection(settings, tmp_path: Path):
+    settings.SHOWCASE = {"OUTPUT_DIR": tmp_path / ".showcase"}
+    stdout = StringIO()
+
+    call_command("showcase", stdout=stdout)
+
+    output = stdout.getvalue()
+    assert "No device selected" in output
+    assert not (tmp_path / ".showcase" / "manifest.json").exists()
+
+
+def test_showcase_timing_flag_prints_total_duration(settings, tmp_path: Path):
+    settings.SHOWCASE = {"OUTPUT_DIR": tmp_path / ".showcase"}
+    stdout = StringIO()
+
+    call_command("showcase", timing=True, stdout=stdout)
+
+    output = stdout.getvalue()
+    assert "Total duration:" in output
+
+
+def test_showcase_pdf_flag_emits_pdf_message(settings, tmp_path: Path, monkeypatch):
+    settings.SHOWCASE = {"OUTPUT_DIR": tmp_path / ".showcase"}
+    stdout = StringIO()
+
+    from django_showcase.report.builder import ReportBuilder
+
+    monkeypatch.setattr(
+        ReportBuilder,
+        "build_pdf",
+        lambda _self, report_dir, screenshot_paths: report_dir / "screenshots.pdf",
+    )
+
+    call_command("showcase", desktop=True, pdf=True, stdout=stdout)
+
+    output = stdout.getvalue()
+    assert "PDF report written to" in output

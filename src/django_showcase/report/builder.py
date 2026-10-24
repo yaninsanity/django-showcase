@@ -92,3 +92,47 @@ class ReportBuilder:
         output_path = report_dir / "index.html"
         output_path.write_text(html, encoding="utf-8")
         return output_path
+
+    def build_pdf(
+        self,
+        report_dir: Path,
+        screenshot_paths: list[Path],
+        filename: str = "screenshots.pdf",
+    ) -> Path | None:
+        images: list[Path] = [
+            path
+            for path in screenshot_paths
+            if path.suffix.lower() in {".png", ".jpg", ".jpeg"} and path.exists()
+        ]
+        if not images:
+            return None
+
+        try:
+            from PIL import Image
+        except Exception as exc:  # pragma: no cover - exercised by integration environments
+            raise RuntimeError(
+                "PDF export requires Pillow. Install it with `pip install Pillow`."
+            ) from exc
+
+        report_dir.mkdir(parents=True, exist_ok=True)
+        output_path = report_dir / filename
+        first: Image.Image | None = None
+        rest: list[Image.Image] = []
+        try:
+            for index, path in enumerate(images):
+                image = Image.open(path).convert("RGB")
+                if index == 0:
+                    first = image
+                else:
+                    rest.append(image)
+
+            if first is None:
+                return None
+
+            first.save(output_path, "PDF", save_all=True, append_images=rest)
+            return output_path
+        finally:
+            if first is not None:
+                first.close()
+            for image in rest:
+                image.close()
