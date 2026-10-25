@@ -5,14 +5,14 @@ on:
     branches:
       - main
       - dev
-  pull_request:
-    types: [closed]
-    branches:
-      - main
 
 permissions:
   contents: write
   id-token: write
+
+concurrency:
+  group: publish-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # SNAPSHOT JOB：dev 分支 → TestPyPI
@@ -48,7 +48,7 @@ jobs:
       - name: Build package if no release
         if: steps.release.outputs.released != 'true'
         run: |
-          CURRENT_VERSION=$(python -c "from django_showcase import __version__; print(__version__)")
+          CURRENT_VERSION=$(python -c "import runpy; print(runpy.run_path('src/django_showcase/_version.py')['__version__'])")
           DEV_VERSION="${CURRENT_VERSION}.dev$(date +%Y%m%d%H%M%S)"
           echo "__version__ = \"$DEV_VERSION\"" > src/django_showcase/_version.py
           python -m build
@@ -61,9 +61,7 @@ jobs:
 
   # RELEASE JOB：main 分支 → PyPI
   release:
-    if: |
-      (github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip-release]')) ||
-      (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+    if: github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip-release]')
     name: Official Release
     runs-on: ubuntu-latest
     steps:

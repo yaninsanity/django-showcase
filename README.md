@@ -22,6 +22,22 @@ Django project
 
 The architecture is deterministic-first. Static project signals drive discovery, while agentic planning is an optional provider boundary that can only return structured `SeedPlan` data.
 
+## Stability and feature status
+
+Stable core for packaging and release:
+
+- deterministic discovery from Django URLs + frontend route scanning
+- scenario graph + capture plan compilation
+- placeholder/playwright capture execution
+- static report + manifest + archive output
+
+Experimental (opt-in, not production-tested yet):
+
+- `--agentic` and related `AGENT_*` planning paths
+- scenario-mode seeded capture flow (`--scenarios` / `SCENARIO_MODE`)
+
+These features remain available for early adopters, but they are intentionally opt-in and the command emits runtime warnings when enabled.
+
 ## Install
 
 ```bash
@@ -81,7 +97,8 @@ SHOWCASE = {
   "AGENT_MODEL": "gpt-4.1-mini",
   "AGENT_TIMEOUT_SECONDS": 30.0,
   "AGENT_MAX_RETRIES": 2,
-  "AGENTIC_SEED_STRATEGY": "all_pages",  # all_pages | goal_only
+  "AGENTIC_SEED_STRATEGY": "all_pages",  # EXPERIMENTAL: all_pages | goal_only
+  "SCENARIO_MODE": False,  # EXPERIMENTAL: isolated transaction-seeded runs
   "ARCHIVE_FILENAME": "showcase.zip",
   "PROMPT_FILE": ".showcase/prompts.json",  # optional JSON prompt overrides
   "PROMPTS": {
@@ -109,8 +126,7 @@ Default output:
 .showcase/
 ├── manifest.json
 ├── report/
-│   ├── index.html
-│   └── scenarios/
+│   └── index.html
 ├── skipped/
 │   ├── backend/<module>/<candidate>.txt
 │   └── frontend/<module>/<candidate>.txt
@@ -158,6 +174,13 @@ Seeding writes demo objects only inside an isolated scenario session (`--scenari
 Capture execution is also fail-safe: with `CAPTURE_BACKEND="auto"`, real Playwright capture is attempted only when `CAPTURE_BASE_URL` is configured and Playwright is available; otherwise the engine degrades to placeholder images and records warnings in `manifest.json` and the report.
 
 For authenticated captures, the engine prepares the login account once at startup (instead of before every scenario). Set `CAPTURE_USE_TEMP_USER=False` to use an existing account (with `CAPTURE_ADMIN_USERNAME` / `CAPTURE_ADMIN_PASSWORD`) and skip automatic create/delete.
+
+Authentication mode guidance:
+
+- Temp user mode (`CAPTURE_USE_TEMP_USER=True`, default): easiest local setup; command creates then deletes a capture user.
+- Existing user mode (`CAPTURE_USE_TEMP_USER=False`): use this in locked-down environments where the runner cannot write user rows or to capture pages with already generated data.
+
+For containerized or HTTP-only execution environments, temp-user creation may fail if DB writes are blocked from the command runtime. In that case, switch to existing-user mode and provide stable credentials.
 
 At the end of every full run, the tool builds `.showcase/showcase.zip` (or your `ARCHIVE_FILENAME`) containing manifest, report, screenshots, and metadata for one-click demo handoff.
 

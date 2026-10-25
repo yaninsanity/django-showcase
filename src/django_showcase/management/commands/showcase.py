@@ -48,10 +48,12 @@ class Command(BaseCommand):
         parser.add_argument(
             "--agentic",
             action="store_true",
-            help="Enable agentic providers when configured.",
+            help="Enable experimental agentic providers when configured.",
         )
         parser.add_argument(
-            "--scenarios", action="store_true", help="Run in isolated scenario mode."
+            "--scenarios",
+            action="store_true",
+            help="Run experimental isolated scenario mode.",
         )
         parser.add_argument(
             "--seed-strategy",
@@ -140,6 +142,14 @@ class Command(BaseCommand):
 
         config = ShowcaseConfig.from_settings()
         warnings = AgentWarningCollector()
+
+        if options["agentic"]:
+            self.stdout.write(
+                self.style.WARNING(
+                    "EXPERIMENTAL: --agentic is not production-tested yet; "
+                    "use only for preview runs and review output manually."
+                )
+            )
 
         prompt_overrides = dict(config.prompt_overrides or {})
         if options["prompt_file"]:
@@ -359,6 +369,24 @@ class Command(BaseCommand):
             split_sources=split_route_source_dirs,
             event_logger=capture_log,
         )
+        if config.capture_use_temp_user:
+            self.stdout.write(
+                "Capture auth mode: temporary superuser "
+                "(auto create/delete)."
+            )
+            self.stdout.write(
+                self.style.WARNING(
+                    "Temp user mode needs database write access. "
+                    "If your runtime cannot write to DB (for example containerized "
+                    "HTTP-only access), set CAPTURE_USE_TEMP_USER=False and provide "
+                    "CAPTURE_ADMIN_USERNAME/CAPTURE_ADMIN_PASSWORD for an existing user."
+                )
+            )
+        else:
+            self.stdout.write(
+                "Capture auth mode: existing user "
+                "(no auto create/delete)."
+            )
         capture_workers = max(1, int(config.capture_workers))
         if scenario_mode and capture_workers > 1:
             warnings.warn(
@@ -367,6 +395,12 @@ class Command(BaseCommand):
             )
             capture_workers = 1
         if scenario_mode:
+            self.stdout.write(
+                self.style.WARNING(
+                    "EXPERIMENTAL: SCENARIO_MODE seeding/capture flow is still "
+                    "evolving; validate results before sharing."
+                )
+            )
             self.stdout.write(
                 self.style.WARNING(
                     "SCENARIO_MODE enabled: each scenario runs in an isolated "
@@ -639,10 +673,22 @@ class Command(BaseCommand):
                                 f"plans={len(backend_plans)}"
                             )
                     if frontend_plans:
+                        if capture_workers > 1:
+                            self.stdout.write(
+                                self.style.WARNING(
+                                    "Frontend capture remains sequential even when "
+                                    "CAPTURE_WORKERS>1 to avoid login/session races "
+                                    "and unstable SPA render timing."
+                                )
+                            )
                         capture_log(
                             "capture mode=sequential "
                             f"route_source=frontend workers=1 "
                             f"plans={len(frontend_plans)}"
+                        )
+                        capture_log(
+                            "frontend sequential mode reason="
+                            "shared-auth/session stability and consistent SPA hydration"
                         )
 
                     for plan in plans:
