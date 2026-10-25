@@ -63,11 +63,16 @@ def test_login_if_needed_fills_admin_form_and_submits():
             self.first = self
 
         def count(self):
-            return 1 if self.selector in {
-                "input[name='username']",
-                "input[name='password']",
-                "input[type='submit']",
-            } else 0
+            return (
+                1
+                if self.selector
+                in {
+                    "input[name='username']",
+                    "input[name='password']",
+                    "input[type='submit']",
+                }
+                else 0
+            )
 
         def fill(self, value: str):
             calls.append(("fill", self.selector, value))
@@ -440,13 +445,7 @@ def test_safe_capture_skips_status_404(monkeypatch, tmp_path: Path):
 
     assert result.skipped is True
     assert result.skipped_reason == "404 not found"
-    reason_file = (
-        tmp_path
-        / "skipped"
-        / "orders"
-        / "pending"
-        / "desktop.txt"
-    )
+    reason_file = tmp_path / "skipped" / "orders" / "pending" / "desktop.txt"
     assert reason_file.exists()
     assert "404 not found" in reason_file.read_text(encoding="utf-8")
 
@@ -487,9 +486,18 @@ def test_should_skip_auto_login_for_login_and_register_paths():
         captures=[],
     )
 
-    assert engine._should_skip_auto_login("http://localhost:5173/auth/login/", login_plan) is True
-    assert engine._should_skip_auto_login("http://localhost:5173/register/", register_plan) is True
-    assert engine._should_skip_auto_login("http://localhost:5173/orders/", orders_plan) is False
+    assert (
+        engine._should_skip_auto_login("http://localhost:5173/auth/login/", login_plan)
+        is True
+    )
+    assert (
+        engine._should_skip_auto_login("http://localhost:5173/register/", register_plan)
+        is True
+    )
+    assert (
+        engine._should_skip_auto_login("http://localhost:5173/orders/", orders_plan)
+        is False
+    )
 
 
 def test_prepare_auth_user_runs_once(monkeypatch):

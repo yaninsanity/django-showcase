@@ -100,9 +100,7 @@ class ReportBuilder:
                 "issue_skipped_pages", 0
             ),
             issue_skipped_grouped_details=_format_issue_skip_grouped_details(
-                ((manifest or {}).get("capture") or {}).get(
-                    "issue_skipped_details", []
-                )
+                ((manifest or {}).get("capture") or {}).get("issue_skipped_details", [])
             ),
             routes=frontend.get("routes", 0),
             router_files=len(frontend.get("router_files", [])),
@@ -135,7 +133,9 @@ class ReportBuilder:
 
         try:
             from PIL import Image
-        except Exception as exc:  # pragma: no cover - exercised by integration environments
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - exercised by integration environments
             raise RuntimeError(
                 "PDF export requires Pillow. Install it with `pip install Pillow`."
             ) from exc

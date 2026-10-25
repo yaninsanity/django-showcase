@@ -85,7 +85,9 @@ class CapturePlanCompiler:
 
 def _candidate_output_name(scenario_id: str, module_id: str) -> str:
     prefix = f"{module_id}."
-    candidate = scenario_id[len(prefix) :] if scenario_id.startswith(prefix) else scenario_id
+    candidate = (
+        scenario_id[len(prefix) :] if scenario_id.startswith(prefix) else scenario_id
+    )
     candidate = re.sub(r"[^a-zA-Z0-9_.-]+", "_", candidate).strip("._")
     if not candidate:
         candidate = "scenario"

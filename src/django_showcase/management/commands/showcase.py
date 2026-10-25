@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from dataclasses import replace
-from time import perf_counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
+from pathlib import Path
+from time import perf_counter
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management.base import BaseCommand
@@ -92,7 +92,10 @@ class Command(BaseCommand):
         parser.add_argument(
             "--log",
             action="store_true",
-            help="Enable concise capture logs (user create/login/delete/fallback reasons).",
+            help=(
+                "Enable concise capture logs "
+                "(user create/login/delete/fallback reasons)."
+            ),
         )
         parser.add_argument(
             "--mobile",
@@ -107,7 +110,10 @@ class Command(BaseCommand):
         parser.add_argument(
             "--pdf",
             action="store_true",
-            help="Generate an additional PDF report that includes all captured screenshots.",
+            help=(
+                "Generate an additional PDF report that includes all "
+                "captured screenshots."
+            ),
         )
         parser.add_argument(
             "--timing",
@@ -124,9 +130,9 @@ class Command(BaseCommand):
                 elapsed = perf_counter() - started_at
                 self.stdout.write(self.style.SUCCESS(f"Total duration: {elapsed:.2f}s"))
 
-        verbose_capture_logs = bool(options.get("log")) or int(
-            options.get("verbosity", 1)
-        ) >= 2
+        verbose_capture_logs = (
+            bool(options.get("log")) or int(options.get("verbosity", 1)) >= 2
+        )
 
         def capture_log(message: str) -> None:
             if verbose_capture_logs:
@@ -256,7 +262,9 @@ class Command(BaseCommand):
             graph.scenarios = {
                 scenario_id: scenario
                 for scenario_id, scenario in graph.scenarios.items()
-                if not _is_skipped_scenario(scenario.module, scenario.params, skip_filters)
+                if not _is_skipped_scenario(
+                    scenario.module, scenario.params, skip_filters
+                )
             }
             graph.modules = {
                 module_id: module
@@ -278,7 +286,8 @@ class Command(BaseCommand):
             if len(plans) < planned_count:
                 self.stdout.write(
                     self.style.WARNING(
-                        "SCENARIO_MODE disabled: collapsing duplicate scenario captures per URL."
+                        "SCENARIO_MODE disabled: collapsing duplicate "
+                        "scenario captures per URL."
                     )
                 )
         if split_route_source_dirs:
@@ -353,13 +362,15 @@ class Command(BaseCommand):
         capture_workers = max(1, int(config.capture_workers))
         if scenario_mode and capture_workers > 1:
             warnings.warn(
-                "SCENARIO_MODE uses transaction-scoped seeding; forcing CAPTURE_WORKERS=1."
+                "SCENARIO_MODE uses transaction-scoped seeding; "
+                "forcing CAPTURE_WORKERS=1."
             )
             capture_workers = 1
         if scenario_mode:
             self.stdout.write(
                 self.style.WARNING(
-                    "SCENARIO_MODE enabled: each scenario runs in an isolated transaction and rolls back after capture."
+                    "SCENARIO_MODE enabled: each scenario runs in an isolated "
+                    "transaction and rolls back after capture."
                 )
             )
 
@@ -382,7 +393,8 @@ class Command(BaseCommand):
 
                 if not capture_engine.prepare_auth_user():
                     warnings.warn(
-                        "Capture login user is not ready; captures may fail on authenticated routes."
+                        "Capture login user is not ready; "
+                        "captures may fail on authenticated routes."
                     )
 
                 def run_capture(plan: CapturePlan):
@@ -426,8 +438,14 @@ class Command(BaseCommand):
                     if capture_result.skipped and not getattr(
                         capture_result, "retryable", False
                     ):
-                        skip_reason = capture_result.skipped_reason or "non-renderable route"
-                        if skip_reason not in {"api endpoint", "post-only", "mutation route"}:
+                        skip_reason = (
+                            capture_result.skipped_reason or "non-renderable route"
+                        )
+                        if skip_reason not in {
+                            "api endpoint",
+                            "post-only",
+                            "mutation route",
+                        }:
                             issue_skipped_pages += 1
                             issue_skipped_details.append(
                                 {
@@ -440,7 +458,8 @@ class Command(BaseCommand):
                                 issue_skipped_by_reason.get(skip_reason, 0) + 1
                             )
                         warnings.warn(
-                            f"Skipped scenario {plan.scenario} ({plan.route}): {skip_reason}"
+                            f"Skipped scenario {plan.scenario} "
+                            f"({plan.route}): {skip_reason}"
                         )
                         return
                     successful_plans.append(plan)
@@ -470,32 +489,40 @@ class Command(BaseCommand):
                             if is_retryable(capture_result):
                                 retry_queue.append(plan)
                                 capture_log(
-                                    f"retry queued scenario={plan.scenario} reason={retry_reason(capture_result)}"
+                                    f"retry queued scenario={plan.scenario} "
+                                    f"reason={retry_reason(capture_result)}"
                                 )
                             collect_capture_result(plan, capture_result)
                     else:
                         with ThreadPoolExecutor(max_workers=workers) as pool:
-                            futures = [pool.submit(run_capture, plan) for plan in plan_list]
+                            futures = [
+                                pool.submit(run_capture, plan) for plan in plan_list
+                            ]
                             capture_log(
-                                f"parallel capture submitted tasks={len(futures)} workers={workers}"
+                                f"parallel capture submitted tasks={len(futures)} "
+                                f"workers={workers}"
                             )
                             completed = 0
                             for future in as_completed(futures):
                                 plan, capture_result = future.result()
                                 completed += 1
                                 capture_log(
-                                    f"parallel capture progress completed={completed}/{len(futures)} scenario={plan.scenario}"
+                                    f"parallel capture progress completed="
+                                    f"{completed}/{len(futures)} "
+                                    f"scenario={plan.scenario}"
                                 )
                                 if is_retryable(capture_result):
                                     retry_queue.append(plan)
                                     capture_log(
-                                        f"retry queued scenario={plan.scenario} reason={retry_reason(capture_result)}"
+                                        f"retry queued scenario={plan.scenario} "
+                                        f"reason={retry_reason(capture_result)}"
                                     )
                                 collect_capture_result(plan, capture_result)
 
                     if workers > 1 and retry_queue:
                         capture_log(
-                            f"deferred retry start count={len(retry_queue)} mode=sequential"
+                            f"deferred retry start count={len(retry_queue)} "
+                            f"mode=sequential"
                         )
                         for plan in retry_queue:
                             capture_log(
@@ -507,12 +534,12 @@ class Command(BaseCommand):
                             retry_result = capture_engine.execute(
                                 plan, config.screenshots_dir
                             )
-                            collect_capture_result(plan, retry_result, allow_defer=False)
+                            collect_capture_result(
+                                plan, retry_result, allow_defer=False
+                            )
 
                 if scenario_mode:
-                    capture_log(
-                        f"capture mode=scenario workers=1 plans={len(plans)}"
-                    )
+                    capture_log(f"capture mode=scenario workers=1 plans={len(plans)}")
                     for plan in plans:
                         scenario = graph.scenarios[plan.scenario]
                         capture_log(
@@ -521,7 +548,9 @@ class Command(BaseCommand):
                         )
                         with scenario_transaction(session):
                             seeded_before = seeded
-                            if agentic and (seed_strategy == "all_pages" or scenario.goal):
+                            if agentic and (
+                                seed_strategy == "all_pages" or scenario.goal
+                            ):
                                 goal = scenario.goal or (
                                     "Show a realistic demo state for route "
                                     f"{scenario.route}."
@@ -533,26 +562,35 @@ class Command(BaseCommand):
                                         goal=goal,
                                         schema_summary=schema_summary,
                                     ),
-                                    fallback=scenario.seed.compile() if scenario.seed else None,
+                                    fallback=scenario.seed.compile()
+                                    if scenario.seed
+                                    else None,
                                     warnings=warnings,
                                 )
                                 if seed_plan is not None:
-                                    seeded += executor.execute(seed_plan).objects_created
+                                    seeded += executor.execute(
+                                        seed_plan
+                                    ).objects_created
                                     capture_log(
                                         "scenario seed executed "
-                                        f"scenario={plan.scenario} mode=agentic created={seeded - seeded_before}"
+                                        f"scenario={plan.scenario} "
+                                        "mode=agentic "
+                                        f"created={seeded - seeded_before}"
                                     )
                                 else:
                                     capture_log(
                                         "scenario seed skipped "
-                                        f"scenario={plan.scenario} mode=agentic reason=no-plan"
+                                        f"scenario={plan.scenario} "
+                                        "mode=agentic reason=no-plan"
                                     )
                             elif scenario.seed:
                                 seed_plan = validator.validate(scenario.seed.compile())
                                 seeded += executor.execute(seed_plan).objects_created
                                 capture_log(
                                     "scenario seed executed "
-                                    f"scenario={plan.scenario} mode=deterministic created={seeded - seeded_before}"
+                                    f"scenario={plan.scenario} "
+                                    "mode=deterministic "
+                                    f"created={seeded - seeded_before}"
                                 )
                             else:
                                 capture_log(
@@ -565,8 +603,10 @@ class Command(BaseCommand):
                             )
                             capture_log(
                                 "scenario capture result "
-                                f"scenario={plan.scenario} backend={capture_result.backend_used} "
-                                f"skipped={capture_result.skipped} created={len(capture_result.created_paths)}"
+                                f"scenario={plan.scenario} "
+                                f"backend={capture_result.backend_used} "
+                                f"skipped={capture_result.skipped} "
+                                f"created={len(capture_result.created_paths)}"
                             )
                             collect_capture_result(plan, capture_result)
                         capture_log(
@@ -575,7 +615,8 @@ class Command(BaseCommand):
                         )
                 else:
                     capture_log(
-                        "SCENARIO_MODE disabled: seed execution is computed but database writes are skipped."
+                        "SCENARIO_MODE disabled: seed execution is computed "
+                        "but database writes are skipped."
                     )
                     backend_plans = [
                         plan for plan in plans if plan.route_source == "backend"
@@ -587,15 +628,21 @@ class Command(BaseCommand):
                     if backend_plans:
                         if capture_workers > 1:
                             capture_log(
-                                f"capture mode=parallel route_source=backend workers={capture_workers} plans={len(backend_plans)}"
+                                "capture mode=parallel "
+                                f"route_source=backend workers={capture_workers} "
+                                f"plans={len(backend_plans)}"
                             )
                         else:
                             capture_log(
-                                f"capture mode=sequential route_source=backend workers=1 plans={len(backend_plans)}"
+                                "capture mode=sequential "
+                                f"route_source=backend workers=1 "
+                                f"plans={len(backend_plans)}"
                             )
                     if frontend_plans:
                         capture_log(
-                            f"capture mode=sequential route_source=frontend workers=1 plans={len(frontend_plans)}"
+                            "capture mode=sequential "
+                            f"route_source=frontend workers=1 "
+                            f"plans={len(frontend_plans)}"
                         )
 
                     for plan in plans:
@@ -612,7 +659,9 @@ class Command(BaseCommand):
                                     goal=goal,
                                     schema_summary=schema_summary,
                                 ),
-                                fallback=scenario.seed.compile() if scenario.seed else None,
+                                fallback=scenario.seed.compile()
+                                if scenario.seed
+                                else None,
                                 warnings=warnings,
                             )
                             if seed_plan is not None:
@@ -687,7 +736,9 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Report written to {report_path}"))
         if options.get("pdf"):
             if pdf_path is not None:
-                self.stdout.write(self.style.SUCCESS(f"PDF report written to {pdf_path}"))
+                self.stdout.write(
+                    self.style.SUCCESS(f"PDF report written to {pdf_path}")
+                )
             else:
                 self.stdout.write(
                     self.style.WARNING(
@@ -748,7 +799,9 @@ def _with_route_source_prefix(
     return f"{route_source}/{output_path}"
 
 
-def _collapse_plans_for_non_scenario_mode(plans: list[CapturePlan]) -> list[CapturePlan]:
+def _collapse_plans_for_non_scenario_mode(
+    plans: list[CapturePlan],
+) -> list[CapturePlan]:
     selected: dict[tuple[str, str], CapturePlan] = {}
     for plan in plans:
         key = (plan.route_source.lower(), (plan.route_path or plan.route).lower())

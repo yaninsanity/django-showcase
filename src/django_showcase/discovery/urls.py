@@ -37,7 +37,8 @@ def normalize_route_pattern(pattern: str) -> str:
         normalized,
     )
     normalized = re.sub(
-        r"<(?:(?P<converter>[a-zA-Z_][a-zA-Z0-9_]*):)?(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)>",
+        r"<(?:(?P<converter>[a-zA-Z_][a-zA-Z0-9_]*):)?"
+        r"(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)>",
         lambda match: _sample_placeholder(
             converter=(match.group("converter") or "").lower(),
             name=(match.group("name") or "").lower(),

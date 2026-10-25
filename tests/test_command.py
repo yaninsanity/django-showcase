@@ -12,7 +12,9 @@ def test_showcase_command_writes_manifest_and_report(settings, tmp_path: Path):
 
     assert (tmp_path / ".showcase" / "manifest.json").exists()
     assert (tmp_path / ".showcase" / "report" / "index.html").exists()
-    order_shots = list((tmp_path / ".showcase" / "screenshots" / "backend" / "orders").glob("*.png"))
+    order_shots = list(
+        (tmp_path / ".showcase" / "screenshots" / "backend" / "orders").glob("*.png")
+    )
     assert order_shots
     assert (tmp_path / ".showcase" / "showcase.zip").exists()
 
@@ -144,7 +146,9 @@ def test_showcase_frontend_only_filters_backend_routes(settings, tmp_path: Path)
 
     manifest = json.loads((tmp_path / ".showcase" / "manifest.json").read_text())
     assert manifest["scenarios"]
-    assert all(scenario["route"].startswith("billing") for scenario in manifest["scenarios"])
+    assert all(
+        scenario["route"].startswith("billing") for scenario in manifest["scenarios"]
+    )
 
 
 def test_showcase_backend_only_filters_frontend_routes(settings, tmp_path: Path):
@@ -424,7 +428,9 @@ def test_showcase_deferred_retry_success_cleans_failure_artifacts(
             screenshot = output_dir / target.output_path
             screenshot.parent.mkdir(parents=True, exist_ok=True)
             placeholder_txt = screenshot.with_suffix(".txt")
-            skip_txt = (output_dir.parent / "skipped" / target.output_path).with_suffix(".txt")
+            skip_txt = (output_dir.parent / "skipped" / target.output_path).with_suffix(
+                ".txt"
+            )
 
             if count == 1:
                 skip_txt.parent.mkdir(parents=True, exist_ok=True)
@@ -468,7 +474,9 @@ def test_showcase_deferred_retry_success_cleans_failure_artifacts(
             for path in (screenshot, screenshot.with_suffix(".txt")):
                 if path.exists():
                     path.unlink()
-            skip_txt = (output_dir.parent / "skipped" / target.output_path).with_suffix(".txt")
+            skip_txt = (output_dir.parent / "skipped" / target.output_path).with_suffix(
+                ".txt"
+            )
             if skip_txt.exists():
                 skip_txt.unlink()
             parent = skip_txt.parent

@@ -1,10 +1,15 @@
 from django_showcase.capture.compiler import CapturePlanCompiler
-from django_showcase.discovery.models import FieldMetadata, ModelMetadata
-from django_showcase.discovery.urls import RouteInfo, normalize_route_pattern
-from django_showcase.discovery.views import ViewMetadata
-from django_showcase.discovery.models import inspect_models
-from django_showcase.discovery.urls import discover_routes
-from django_showcase.discovery.views import inspect_views
+from django_showcase.discovery.models import (
+    FieldMetadata,
+    ModelMetadata,
+    inspect_models,
+)
+from django_showcase.discovery.urls import (
+    RouteInfo,
+    discover_routes,
+    normalize_route_pattern,
+)
+from django_showcase.discovery.views import ViewMetadata, inspect_views
 from django_showcase.scenario.planner import PlannerInputs, ScenarioPlanner
 
 
@@ -71,7 +76,9 @@ def test_planner_handles_numeric_choices():
             models=[
                 ModelMetadata(
                     label="shop.Order",
-                    fields=[FieldMetadata(name="status", kind="IntegerField", choices=[1])],
+                    fields=[
+                        FieldMetadata(name="status", kind="IntegerField", choices=[1])
+                    ],
                 )
             ],
             max_scenarios_per_module=8,
@@ -112,7 +119,9 @@ def test_planner_propagates_route_method_metadata():
                     allowed_methods=("post",),
                 )
             ],
-            views=[ViewMetadata(route_name="orders_submit", view_name="OrdersSubmitView")],
+            views=[
+                ViewMetadata(route_name="orders_submit", view_name="OrdersSubmitView")
+            ],
             models=[],
             max_scenarios_per_module=4,
             max_choices_per_field=2,

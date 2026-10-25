@@ -8,8 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
 from time import sleep
-from typing import Callable
-from typing import Literal
+from typing import Callable, Literal
 
 from django_showcase.capture.plan import CapturePlan
 
@@ -110,7 +109,8 @@ class CaptureEngine:
         reason: str = "placeholder backend",
     ) -> CaptureResult:
         self._log(
-            f"fallback placeholder for scenario={plan.scenario} route={plan.route}: {reason}"
+            f"fallback placeholder for scenario={plan.scenario}"
+            f" route={plan.route}: {reason}"
         )
         created: list[str] = []
         for target in plan.captures:
@@ -137,7 +137,11 @@ class CaptureEngine:
             return CaptureResult(
                 backend_used="placeholder",
                 warnings=[
-                    f"capture base URL is not set for route_source={plan.route_source}; using placeholder captures."
+                    (
+                        "capture base URL is not set for "
+                        f"route_source={plan.route_source}; "
+                        "using placeholder captures."
+                    )
                 ],
                 fallback_used=True,
                 fallback_reason="capture base URL is not set",
@@ -148,7 +152,8 @@ class CaptureEngine:
             return CaptureResult(
                 backend_used="placeholder",
                 warnings=[
-                    "Playwright runtime installation failed; using placeholder captures."
+                    "Playwright runtime installation failed; "
+                    "using placeholder captures."
                 ],
                 fallback_used=True,
                 fallback_reason="playwright runtime installation failed",
@@ -177,7 +182,8 @@ class CaptureEngine:
         user_ready = self._prepare_auth_user()
         if not user_ready:
             self._log(
-                f"temp user ensure failed before capture for scenario={plan.scenario}; login may fail"
+                "temp user ensure failed before capture for "
+                f"scenario={plan.scenario}; login may fail"
             )
         self._log(f"capture start scenario={plan.scenario} url={target_url}")
         try:
@@ -223,12 +229,14 @@ class CaptureEngine:
                     page.goto(target_url, wait_until="networkidle")
                     if self._should_skip_auto_login(target_url, plan):
                         self._log(
-                            f"skip auto login for auth page scenario={plan.scenario} url={target_url}"
+                            f"skip auto login for auth page scenario={plan.scenario}"
+                            f" url={target_url}"
                         )
                     else:
                         if plan.route_source == "frontend":
                             self._log(
-                                f"frontend auth probe scenario={plan.scenario} url={target_url}"
+                                f"frontend auth probe scenario={plan.scenario}"
+                                f" url={target_url}"
                             )
                         attempted, success, attempts, status = self._login_with_retry(
                             page,
@@ -243,7 +251,8 @@ class CaptureEngine:
                             login_failed_reason = status
                             warnings.append(
                                 "Login failed for "
-                                f"scenario={plan.scenario} after {attempts} attempts ({status})."
+                                f"scenario={plan.scenario} "
+                                f"after {attempts} attempts ({status})."
                             )
                     if page.url != target_url:
                         page.goto(target_url, wait_until="networkidle")
@@ -252,7 +261,8 @@ class CaptureEngine:
                     page.screenshot(path=str(target_path), full_page=True)
                     created.append(str(target_path))
                     self._log(
-                        f"capture success scenario={plan.scenario} viewport={target.viewport} output={target.output_path}"
+                        f"capture success scenario={plan.scenario} "
+                        f"viewport={target.viewport} output={target.output_path}"
                     )
                 context.close()
                 browser.close()
@@ -265,7 +275,8 @@ class CaptureEngine:
                 f"Playwright capture failed; using placeholder captures ({exc})."
             )
             self._log(
-                f"capture failed scenario={plan.scenario} reason={exc}; fallback to placeholder"
+                f"capture failed scenario={plan.scenario} reason={exc}; "
+                "fallback to placeholder"
             )
             fallback = self._execute_placeholder(plan, output_dir, reason=reason)
             fallback.warnings.extend(warnings)
@@ -347,13 +358,15 @@ class CaptureEngine:
                 page.goto(target_url, wait_until="networkidle")
 
         self._log(
-            f"{route_source} login failed after retries scenario={scenario_id} status={last_status}"
+            f"{route_source} login failed after retries "
+            f"scenario={scenario_id} status={last_status}"
         )
         return attempted, False, attempts, last_status
 
     def _ensure_playwright_runtime(self) -> bool:
         try:
             import playwright  # noqa: F401
+
             return True
         except Exception:
             self._log("playwright not installed; attempting pip install playwright")
@@ -368,6 +381,7 @@ class CaptureEngine:
                 return False
             try:
                 import playwright  # noqa: F401
+
                 self._log("playwright package installation succeeded")
                 return True
             except Exception:
@@ -447,7 +461,9 @@ class CaptureEngine:
                 self._log(f"temp user updated username={username}")
             return True
         except Exception as exc:
-            self._log(f"temp user ensure failed username={self.capture_username}: {exc}")
+            self._log(
+                f"temp user ensure failed username={self.capture_username}: {exc}"
+            )
             return False
 
     def _validate_existing_user(self) -> bool:
@@ -456,7 +472,9 @@ class CaptureEngine:
             from django.contrib.auth import get_user_model
 
             if not settings.configured:
-                self._log("existing user validation skipped: django settings not configured")
+                self._log(
+                    "existing user validation skipped: django settings not configured"
+                )
                 return False
 
             username = self.capture_username or ""
@@ -471,12 +489,17 @@ class CaptureEngine:
                 self._log(f"existing user validation failed: user {username} not found")
                 return False
             if not getattr(user_obj, "is_active", True):
-                self._log(f"existing user validation failed: user {username} is inactive")
+                self._log(
+                    f"existing user validation failed: user {username} is inactive"
+                )
                 return False
             self._log(f"existing user validated username={username}")
             return True
         except Exception as exc:
-            self._log(f"existing user validation failed username={self.capture_username}: {exc}")
+            self._log(
+                f"existing user validation failed username={self.capture_username}: "
+                f"{exc}"
+            )
             return False
 
     def _prepare_auth_user(self) -> bool:
@@ -501,7 +524,8 @@ class CaptureEngine:
     def cleanup_temp_user(self) -> None:
         if not self.use_temp_user:
             self._log(
-                f"temp user cleanup skipped username={self.capture_username} reason=existing-user-mode"
+                "temp user cleanup skipped "
+                f"username={self.capture_username} reason=existing-user-mode"
             )
             return
         try:
@@ -517,10 +541,13 @@ class CaptureEngine:
                 self._log(f"temp user deleted username={username}")
             elif user_obj is not None:
                 self._log(
-                    f"temp user preserved username={username} reason=not-created-by-showcase"
+                    f"temp user preserved username={username} "
+                    f"reason=not-created-by-showcase"
                 )
         except Exception as exc:
-            self._log(f"temp user cleanup failed username={self.capture_username}: {exc}")
+            self._log(
+                f"temp user cleanup failed username={self.capture_username}: {exc}"
+            )
             return
 
     def _login_if_needed(self, page, route_source: str = "backend") -> bool:
@@ -573,7 +600,8 @@ class CaptureEngine:
         submit_button = self._first_matching_selector(page, submit_selectors)
         if submit_button is None:
             self._log(
-                f"{route_source} login submit button not found; trying Enter key submit"
+                f"{route_source} login submit button not found; "
+                "trying Enter key submit"
             )
             page.locator(password_field).first.press("Enter")
             page.wait_for_load_state("networkidle")
@@ -596,7 +624,9 @@ class CaptureEngine:
         try:
             inputs = page.evaluate(
                 """() => {
-                    return Array.from(document.querySelectorAll('input')).slice(0, 12).map((el) => ({
+                    return Array.from(
+                        document.querySelectorAll('input')
+                    ).slice(0, 12).map((el) => ({
                         type: el.getAttribute('type') || 'text',
                         name: el.getAttribute('name') || '',
                         id: el.getAttribute('id') || '',
@@ -750,7 +780,7 @@ class CaptureEngine:
             html = (page.content() or "").lower()
         except Exception:
             html = ""
-        if "{\"detail\":" in html or "application/json" in html:
+        if '{"detail":' in html or "application/json" in html:
             return False
 
         return True
@@ -797,7 +827,9 @@ class CaptureEngine:
             base_dir = self.skipped_dir or output_dir
             self._prune_empty_parent_dirs(reason_path.parent, base_dir)
 
-    def _build_skip_reason_paths(self, plan: CapturePlan, output_dir: Path) -> list[Path]:
+    def _build_skip_reason_paths(
+        self, plan: CapturePlan, output_dir: Path
+    ) -> list[Path]:
         base_dir = self.skipped_dir or output_dir
         paths: list[Path] = []
         for target in plan.captures:

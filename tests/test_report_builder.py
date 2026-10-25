@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from django_showcase.capture.plan import CapturePlan
