@@ -371,8 +371,7 @@ class Command(BaseCommand):
         )
         if config.capture_use_temp_user:
             self.stdout.write(
-                "Capture auth mode: temporary superuser "
-                "(auto create/delete)."
+                "Capture auth mode: temporary superuser " "(auto create/delete)."
             )
             self.stdout.write(
                 self.style.WARNING(
@@ -384,8 +383,7 @@ class Command(BaseCommand):
             )
         else:
             self.stdout.write(
-                "Capture auth mode: existing user "
-                "(no auto create/delete)."
+                "Capture auth mode: existing user " "(no auto create/delete)."
             )
         capture_workers = max(1, int(config.capture_workers))
         if scenario_mode and capture_workers > 1:
