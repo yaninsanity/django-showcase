@@ -18,7 +18,9 @@ class SeedPlanGuardrails:
             try:
                 model = apps.get_model(seed.model)
             except (LookupError, ValueError) as exc:
-                raise ValidationError(f"Unknown model in seed plan: {seed.model!r}") from exc
+                raise ValidationError(
+                    f"Unknown model in seed plan: {seed.model!r}"
+                ) from exc
             self._check_fields(model, seed.model, seed.fields)
         return self._volume.validate(plan)
 

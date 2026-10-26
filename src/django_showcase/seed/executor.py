@@ -39,18 +39,26 @@ class SeedExecutor:
 
     def _create(self, model, overrides: dict[str, object], depth: int = 0):
         if depth > _MAX_RELATION_DEPTH:
-            raise ValidationError(f"Related seed chain too deep for {model._meta.label}.")
+            raise ValidationError(
+                f"Related seed chain too deep for {model._meta.label}."
+            )
         values = dict(overrides)
         for field in model._meta.get_fields():
             if not getattr(field, "concrete", False) or field.auto_created:
                 continue
-            if getattr(field, "many_to_many", False) or field.primary_key or field.name in values:
+            if (
+                getattr(field, "many_to_many", False)
+                or field.primary_key
+                or field.name in values
+            ):
                 continue
             if field.has_default() or field.null:
                 continue
             if field.is_relation:
                 related = field.related_model
-                values[field.name] = related.objects.first() or self._create(related, {}, depth + 1)
+                values[field.name] = related.objects.first() or self._create(
+                    related, {}, depth + 1
+                )
                 continue
             if getattr(field, "blank", False):
                 continue

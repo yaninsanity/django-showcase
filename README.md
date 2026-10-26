@@ -22,6 +22,22 @@ Django project
 
 The architecture is deterministic-first. Static project signals drive discovery, while agentic planning is an optional provider boundary that can only return structured `SeedPlan` data.
 
+## Stability and feature status
+
+Stable core for packaging and release:
+
+- deterministic discovery from Django URLs + frontend route scanning
+- scenario graph + capture plan compilation
+- placeholder/playwright capture execution
+- static report + manifest + archive output
+
+Experimental (opt-in, not production-tested yet):
+
+- `--agentic` and related `AGENT_*` planning paths
+- scenario-mode seeded capture flow (`--scenarios` / `SCENARIO_MODE`)
+
+These features remain available for early adopters, but they are intentionally opt-in and the command emits runtime warnings when enabled.
+
 ## Install
 
 ```bash
@@ -48,10 +64,20 @@ INSTALLED_APPS = [
 ```bash
 python manage.py showcase
 python manage.py showcase --plan
+python manage.py showcase --desktop
+python manage.py showcase --mobile
+python manage.py showcase --desktop --mobile
+python manage.py showcase --desktop --pdf
+python manage.py showcase --desktop --timing
 python manage.py showcase --only orders
+python manage.py showcase --skip admin
+python manage.py showcase --frontend
+python manage.py showcase --backend
 python manage.py showcase --agentic
 python manage.py showcase --scenarios
 ```
+
+`--desktop` / `--mobile` are now explicit device selectors. At least one must be provided, otherwise the command prints a warning and exits to avoid accidentally generating unexpected device screenshots.
 
 Common production-safe toggles:
 
@@ -60,13 +86,19 @@ SHOWCASE = {
   "FRONTEND_DIR": "frontend/",
   "FRONTEND_DIRS": ["backend_ui/", "frontend_ui/"],  # optional parallel roots
   "CAPTURE_BACKEND": "auto",  # auto | playwright | placeholder
+  "CAPTURE_WORKERS": 1,  # >1 enables backend parallel capture in non-scenario mode (frontend remains sequential)
   "CAPTURE_BASE_URL": "http://127.0.0.1:8000",  # required for real browser captures
+  "FRONTEND_BASE_URL": "http://127.0.0.1:5173",  # optional frontend runtime URL for SPA captures
   "CAPTURE_TIMEOUT_SECONDS": 20.0,
+  "CAPTURE_USE_TEMP_USER": True,  # True: create temp superuser and auto-delete after run
+  "CAPTURE_ADMIN_USERNAME": "showcaseuser",  # temp user credentials or existing login
+  "CAPTURE_ADMIN_PASSWORD": "showcaseuser",  # temp user credentials or existing login
   "AGENT_PROVIDER": "openai",
   "AGENT_MODEL": "gpt-4.1-mini",
   "AGENT_TIMEOUT_SECONDS": 30.0,
   "AGENT_MAX_RETRIES": 2,
-  "AGENTIC_SEED_STRATEGY": "all_pages",  # all_pages | goal_only
+  "AGENTIC_SEED_STRATEGY": "all_pages",  # EXPERIMENTAL: all_pages | goal_only
+  "SCENARIO_MODE": False,  # EXPERIMENTAL: isolated transaction-seeded runs
   "ARCHIVE_FILENAME": "showcase.zip",
   "PROMPT_FILE": ".showcase/prompts.json",  # optional JSON prompt overrides
   "PROMPTS": {
@@ -85,6 +117,7 @@ Additional CLI controls:
 python manage.py showcase --agentic --frontend-dir ../frontend --frontend-dir ../admin-frontend
 python manage.py showcase --agentic --prompt-file .showcase/prompts.json
 python manage.py showcase --agentic --seed-strategy all_pages
+python manage.py showcase --only orders admin --skip admin
 ```
 
 Default output:
@@ -93,10 +126,24 @@ Default output:
 .showcase/
 ├── manifest.json
 ├── report/
-│   ├── index.html
-│   └── scenarios/
+│   └── index.html
+├── skipped/
+│   ├── backend/<module>/<candidate>.txt
+│   └── frontend/<module>/<candidate>.txt
 └── screenshots/
+  ├── desktop/  # present when both --desktop and --mobile are selected
+  │ ├── backend/<module>/<candidate>.png
+  │ └── frontend/<module>/<candidate>.png
+  ├── mobile/   # present when both --desktop and --mobile are selected
+  │ ├── backend/<module>/<candidate>.png
+  │ └── frontend/<module>/<candidate>.png
+  ├── backend/<module>/<candidate>.png  # single-device run
+  └── frontend/<module>/<candidate>.png # single-device run
 ```
+
+When running only one source (`--frontend` or `--backend`), captures and skipped records are written directly under that source root without the extra backend/frontend split folder. When running only one device (`--desktop` or `--mobile`), no top-level device split folder is created.
+
+In non-scenario mode with `CAPTURE_WORKERS > 1`, backend routes run in parallel first, then frontend routes run sequentially. This reduces transient frontend login/render timing failures while keeping backend throughput.
 
 ## Frontend compatibility
 
@@ -122,7 +169,18 @@ Every discovered route (including admin and configuration routes) gets at least 
 
 Seeding writes demo objects only inside an isolated scenario session (`--scenarios`). Each scenario runs inside a database transaction that is always rolled back, so the project database is never polluted. In default read-only mode the executor performs zero writes by construction. Required fields the plan does not specify are filled with obvious demo values (`Demo name`, `demo@example.com`), and required foreign keys are satisfied by reusing or creating minimal related demo objects.
 
+`SCENARIO_MODE` is a data-isolation mode, not a parallelism mode. Because each scenario capture is tied to a transaction-scoped seed state in this mode, capture workers are forced to 1.
+
 Capture execution is also fail-safe: with `CAPTURE_BACKEND="auto"`, real Playwright capture is attempted only when `CAPTURE_BASE_URL` is configured and Playwright is available; otherwise the engine degrades to placeholder images and records warnings in `manifest.json` and the report.
+
+For authenticated captures, the engine prepares the login account once at startup (instead of before every scenario). Set `CAPTURE_USE_TEMP_USER=False` to use an existing account (with `CAPTURE_ADMIN_USERNAME` / `CAPTURE_ADMIN_PASSWORD`) and skip automatic create/delete.
+
+Authentication mode guidance:
+
+- Temp user mode (`CAPTURE_USE_TEMP_USER=True`, default): easiest local setup; command creates then deletes a capture user.
+- Existing user mode (`CAPTURE_USE_TEMP_USER=False`): use this in locked-down environments where the runner cannot write user rows or to capture pages with already generated data.
+
+For containerized or HTTP-only execution environments, temp-user creation may fail if DB writes are blocked from the command runtime. In that case, switch to existing-user mode and provide stable credentials.
 
 At the end of every full run, the tool builds `.showcase/showcase.zip` (or your `ARCHIVE_FILENAME`) containing manifest, report, screenshots, and metadata for one-click demo handoff.
 

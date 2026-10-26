@@ -27,7 +27,10 @@ def safe_plan_frontend_routes(
     try:
         return provider.agent.plan_frontend_routes(framework, snippets)
     except Exception as exc:
-        warnings.warn(f"Agent frontend discovery failed; using deterministic routes only ({exc}).")
+        warnings.warn(
+            "Agent frontend discovery failed; using deterministic routes only "
+            f"({exc})."
+        )
         return []
 
 
@@ -42,5 +45,8 @@ def safe_plan_seed(
     try:
         return provider.plan(request)
     except Exception as exc:
-        warnings.warn(f"Agent seed planning failed for {request.scenario_id}; using fallback ({exc}).")
+        warnings.warn(
+            "Agent seed planning failed for "
+            f"{request.scenario_id}; using fallback ({exc})."
+        )
         return fallback

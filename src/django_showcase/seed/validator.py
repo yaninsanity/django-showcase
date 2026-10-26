@@ -13,7 +13,9 @@ class SeedPlanValidator:
         total = 0
         for item in plan.models:
             if item.count < 0:
-                raise ValidationError(f"Seed count cannot be negative for {item.model}.")
+                raise ValidationError(
+                    f"Seed count cannot be negative for {item.model}."
+                )
             total += item.count
 
         if total > self.max_objects:
